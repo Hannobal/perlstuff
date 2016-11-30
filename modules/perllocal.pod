@@ -1,0 +1,44 @@
+=head2 Wed Jan 21 11:18:56 2015: C<Module> L<Math::Random|Math::Random>
+
+=over 4
+
+=item *
+
+C<installed into: /usr/local/share/perl/5.14.2>
+
+=item *
+
+C<LINKTYPE: dynamic>
+
+=item *
+
+C<VERSION: 0.71>
+
+=item *
+
+C<EXE_FILES: >
+
+=back
+
+=head2 Wed Feb 10 10:58:29 2016: C<Module> L<App::cpanminus|App::cpanminus>
+
+=over 4
+
+=item *
+
+C<installed into: /usr/local/share/perl/5.14.2>
+
+=item *
+
+C<LINKTYPE: dynamic>
+
+=item *
+
+C<VERSION: 1.7040>
+
+=item *
+
+C<EXE_FILES: bin/cpanm>
+
+=back
+
