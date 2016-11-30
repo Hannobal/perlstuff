@@ -1,0 +1,432 @@
+#!/usr/bin/perl
+
+# calculates the tilt angles of certain phosponic acids from DL_POLY HISTORY
+# files and their develeopment in time
+
+use Math::Trig;
+use Cwd;
+use Switch;
+use hanno_utility;
+
+if($#ARGV<1) {
+  print "input format:\n";
+  print "1. <output-directory>\n";
+  print "2. split job? <y/n/h>\n";
+  print "3. [histogram resolution (default: 0.5 deg)]\n";
+  print "4. [begin frame]\n";
+  print "5. [end frame]\n";
+  exit 1;
+} 
+
+$outdir = $ARGV[0];
+
+if($#ARGV>1) {
+  $histres=$ARGV[2];
+  if($histres<=0) {
+    print "**** error: histogram resolution must be greater than 0!\n";
+    exit 1;
+  }
+} else {
+  $histres=0.5;
+}
+
+if ($#ARGV>2) {
+  $startframe = $ARGV[3];
+} else {
+  $startframe = 0;
+}
+
+if ($#ARGV>3) {
+  $endframe = $ARGV[4];
+} else {
+  $endframe = 9e20;
+}
+
+$nextpercent = 5;
+
+if(not $ARGV[1] =~ /^[ynh]/i) {
+  print "**** error: did not recognize input for \"split job?\"!";
+  exit 1;
+} elsif($ARGV[1] =~ /^y/i) {
+  $splitjob = 1;
+  $heatup   = 0;
+} elsif($ARGV[1] =~ /^h/i) {
+  $heatup   = 1;
+  $splitjob = 1;
+} else {
+  $heatup   = 0;
+  $splitjob = 0;
+}
+
+check_integer($startframe) or die "**** error: $startframe is not an integer number!\n";
+check_integer($endframe) or die "**** error: $endframe is not an integer number!\n";
+
+if($endframe<$startframe) {
+  print "**** error: end frame must not be smaller than start frame\n";
+  exit;
+}
+
+%refp5index = (
+  # neutral PAs
+  "C10-PA"     => 10,
+  "C14-PA"     => 10,
+  "C17-PA"     => 17,
+  "C1-PA"      =>  1,
+  "C60-C18-PA" => 10,
+  #single deprotonated PAs
+  "BTBT-C12-PA-d"    => 10,
+  "C10-PA-d"         => 10,
+  "C12-C60-C18-PA-d" => 10,
+  "C14-PA-d"         => 10,
+  "C17-PA-d"         => 17,
+  "C1-PA-d"          =>  1,
+  "C2-4T-C12-PA-d"   => 10,
+  "C60-C18-PA-d"     => 10,
+  "F15-C18-PA-d"     => 10,
+  "PHDA-d"           => 10,
+  #double deprotonated PAs
+  "C10-PA-2d" => 10
+);
+
+%refCindex = (
+  # neutral PAs
+  "C10-PA"     => 0,
+  "C14-PA"     => 38,
+  "C17-PA"     => 15,
+  "C1-PA"      => 0,
+  "C60-C18-PA" => 52,
+  #single deprotonated PAs
+  "BTBT-C12-PA-d"    => 36,
+  "C10-PA-d"         => 0,
+  "C12-C60-C18-PA-d" => 52,
+  "C14-PA-d"         => 38,
+  "C17-PA-d"         => 15,
+  "C1-PA-d"          => 0,
+  "C2-4T-C12-PA-d"   => 36,
+  "C60-C18-PA-d"     => 52,
+  "F15-C18-PA-d"     => 52,
+  "PHDA-d"           => 48,
+  #double deprotonated PAs
+  "C10-PA-2d" => 0
+);
+
+############### find the relevant directories to read #########################
+opendir(DIR, ".");
+if(not $splitjob) {
+  @directories=(".")
+} else {
+  @files = readdir(DIR);
+  closedir(DIR);
+  # find the relevant folders
+  $i=0;
+  foreach $file (@files) {
+    if (check_integer($file)) {
+      $files2[$i]=$file;
+      $i++;
+    }
+  }
+  @files = sort {$a <=> $b} @files2;
+  # find index of start directory
+  if($heatup) {
+    $startdirindex = 0;
+    $enddirindex   = $#files;
+  } else {
+    $startdirindex=-1;
+    for($i=0;$i<=$#files;$i++) {
+      if($files[$i]>=$startframe) {
+	$startdirindex = $i;
+	last;
+      }
+    }
+    if($startdirindex==-1) {
+      print "start frame is larger than simulation frame";
+      exit 1;
+    }
+    # find index of end directory
+    for($i=0;$i<=$#files;$i++) {
+      if(($files[$i]>=$endframe) or ($i==$#files)) {
+	$enddirindex = $i;
+	last;
+      }
+    }
+  }
+  @directories=@files[$startdirindex..$enddirindex];
+}
+
+$endframe=$directories[$enddirindex] if($endframe==9e20);
+$numframes=$endframe-$startframe;
+
+############### read the HISTORY file from each directory #####################
+$f         = 0;
+$starttime = 0;
+$minangle = 9e20;
+$maxangle = -9e20;
+print "@files\n";
+foreach $dir (@directories) {
+  print "reading directory $dir\n" if $splitjob;
+  if(not open(HISTORY, "<", "$dir/HISTORY")) {
+    print "**** warning: file HISTORY was not found in directory $dir\n";
+    next;
+  }
+#   open(CONTROL, "<", "$dir/CONTROL") or print "file CONTROL was not found in $dir\n";
+  open(FIELD, "<", "$dir/FIELD") or print "file FIELD was not found in $dir\n";
+
+# read FIELD file and rest of HISTORY file
+  while(<FIELD>) {
+    if(/molecules/ or /MOLECULES/) { last; }
+  }
+  ($field_nummols) = /^\s*\S+\s+(\S+)/;
+#   print "found $field_nummols molecules\n";
+  if($field_nummols==0) {
+    print "no molecules found in FIELD file $dir/FIELD\n";
+    exit 1;
+  }
+  $field_numatoms=0;
+  @mol_atomcharge = ();
+  @mol_atommass   = ();
+  @mol_atomname   = ();
+  @mol_name       = ();
+  @mol_numatoms   = ();
+  @mol_numents    = ();
+  for($t=0;$t<$field_nummols;$t++) {
+    $j = 0; #number of atoms counted for the molecule
+    $_=<FIELD>;
+    $mol_name[$t]=$_;
+    $mol_name[$t] =~ s/^\s+//;
+    $mol_name[$t] =~ s/\s+$//;
+    $_=<FIELD>;
+    ($mol_numents[$t])=/^\s*\S+\s+(\S+)/;
+    $_=<FIELD>;
+    ($mol_numatoms[$t])=/^\s*\S+\s+(\S+)/;
+    $field_numatoms += $mol_numents[$t]*$mol_numatoms[$t];
+#     print "found ".$mol_numatoms[$t]." atoms in $t. molecule named ".$mol_name[$t]." with ".$mol_numents[$t]." entities\n";
+    while(<FIELD>) {
+      if(/FINISH/ or /finish/ or /CLOSE/ or /close/ or /BONDS/
+	or /bonds/ or /ANGLES/ or /angles/ or /DIHEDRALS/ or /dihedrals/) {
+	if(not (/FINISH/ or /finish/)) {
+	  while(<FIELD>) { 
+	    if(/FINISH/ or /finish/) { last; }
+	  }
+	}
+	last;
+      }
+      ($mol_atomname[$t][$j],$mol_atommass[$t][$j],$mol_atomcharge[$t][$j])=/^\s*(\S+)\s+(\S+)\s+(\S+)/;
+  #     printf "%8s %3.5f %3.5f\n", $mol_atomname[$t][$j],$mol_atommass[$t][$j],$mol_atomcharge[$t][$j];
+      $j++;
+    }
+    if($j!=$mol_numatoms[$t]) {
+      print "**** error: ".$mol_numatoms[$t]." expected for molecule ".$mol_name[$t]." but ".$j." were found\n";
+      exit 1;
+    }
+  }
+  close(FIELD);
+  
+  ######################## read HISTORY file ##################################
+  $linenumber=1;
+  $err=0;
+  while(<HISTORY>) { # skip head of HISTORY file (for newer versions of dl_poly)
+    if(/timestep/) { last; }
+  }
+  while(1) {
+    if(/timestep/) {
+      $numpas=0; # number of PAs in current frame
+      @cdata=();
+      ($frame[$f], $numatoms, $trajkey, $periodkey, $integration[$f]) =
+      /timestep\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/;
+      last if($frame[$f]>$endframe and not $heatup);
+      $time[$f]=$frame[$f]*$integration[$f];
+      $time[$f]+=$starttime if $time[$f]<=$starttime;
+      #print "evaluating timestep $frame[$f]\n";
+      if($numatoms != $field_numatoms) {
+	print "**** error: in HISTORY file: $field_numatoms atoms expected, $numatoms given in frame ".$frame[$f]." of HISTORY!\n";
+	exit 1;
+      }
+      if(not ($periodkey==2 or $periodkey==6)) {
+	print "**** error:, this script only works for orthogonal cells!\n";
+	exit 1;
+      } elsif($periodkey=6) { # for mirroring
+	$cmax=2 # check only x and y
+      } else {
+	$cmax=3 # check x, y and z
+      }
+      if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+      ($cell[0][0],$cell[0][1],$cell[0][2])=/\s*(\S+)\s+(\S+)\s+(\S+)/;
+      if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+      ($cell[1][0],$cell[1][1],$cell[1][2])=/\s*(\S+)\s+(\S+)\s+(\S+)/;
+      if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+      ($cell[2][0],$cell[2][1],$cell[2][2])=/\s*(\S+)\s+(\S+)\s+(\S+)/;
+      $size[0]=($cell[0][0]+$cell[1][0]+$cell[2][0])/2;
+      $size[1]=($cell[0][1]+$cell[1][1]+$cell[2][1])/2;
+      $size[2]=($cell[0][2]+$cell[1][2]+$cell[2][2])/2;
+      for($t=0;$t<$field_nummols;$t++) {
+	for($m=0;$m<$mol_numents[$t];$m++) {
+	  for($a=0;$a<$mol_numatoms[$t];$a++) {
+	    if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+	    ($cdata[$t][$m][$a][9],$cdata[$t][$m][$a][12],$cdata[$t][$m][$a][10],$cdata[$t][$m][$a][11])
+	    = /^\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/;
+	    if($cdata[$t][$m][$a][9] ne $mol_atomname[$t][$a]) {
+	      print "**** error: atom name".$cdata[$t][$m][$a][9]." in HISTORY-file does not match\n";
+	      print "name ".$mol_atomname[$t][$a]." in FIELD file for molecule ".$mol_name[$t]."\n";
+	      $err=1;
+	    }
+	    if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+	    ($cdata[$t][$m][$a][0],$cdata[$t][$m][$a][1],$cdata[$t][$m][$a][2]) = /^\s*(\S+)\s+(\S+)\s+(\S+)/;
+	    if($trajkey>0) { #read velocity
+	      if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+	      ($cdata[$t][$m][$a][3],$cdata[$t][$m][$a][4],$cdata[$t][$m][$a][5]) = /^\s*(\S+)\s+(\S+)\s+(\S+)/;
+	      if($trajkey>1) { #read force
+		if(not $_=<HISTORY>) {print "unexpected end of HISTORY file in timestep ".$frame[$f]."\n"; $err=1;}
+		($cdata[$t][$m][$a][6],$cdata[$t][$m][$a][7],$cdata[$t][$m][$a][8]) = /^\s*(\S+)\s+(\S+)\s+(\S+)/;
+	      }
+	    }
+	  }
+	}
+	last if($err);
+      }
+############### evaluate the molecule angle ###################################
+      if($frame[$f]>=$startframe or $heatup) {
+	for($t=0;$t<$field_nummols;$t++) {
+	  if($mol_name[$t] =~ m/-PA/) {
+	    for($i=0;$i<90;$i+=$histres) {
+	      $histogram{$t}[$f][$i]=0;
+	    }
+# 	    print $mol_name[$t]."\n";
+	    if(not exists $refp5index{$mol_name[$t]}) {
+	      print "**** error: hash p5index does not contain entry for molecule named ".$mol_name[$t]."\n";
+	      exit 1;
+	    }
+	    $refC  = $refCindex{$mol_name[$t]};
+	    $refp5 = $refp5index{$mol_name[$t]};
+	    $numpas+=$mol_numents[$t];
+	    for($m=0;$m<$mol_numents[$t];$m++) {
+	      # make molecule whole again
+	      for($a=1;$a<$mol_numatoms[$t];$a++) {
+		$a_old = $a-1;
+		for($c=0;$c<$cmax;$c++) {
+		  $d[$c] = $cdata[$t][$m][$a][$c]-$cdata[$t][$m][$a_old][$c];
+		  if(abs($d[$c])>$size[$c]) {
+		    $cdata[$t][$m][$a][$c] -= 2 * sgn($cdata[$t][$m][$a][$c]) * $size[$c];
+		  }
+		}#done for $c
+	      }# done for $a
+	      # actual analysis of angles
+	      $dx = $cdata[$t][$m][$refC][0]-$cdata[$t][$m][$refp5][0];
+	      $dy = $cdata[$t][$m][$refC][1]-$cdata[$t][$m][$refp5][1];
+	      $dz = $cdata[$t][$m][$refC][2]-$cdata[$t][$m][$refp5][2];
+	      $l = sqrt($dx*$dx+$dy*$dy);
+	      $angle{$t}[$m][$f] = atan2($l,$dz)/pi*180;
+	      if($angle{$t}[$m][$f]>$maxangle) {
+		$maxangle = $angle{$t}[$m][$f];
+	      }
+	      if($angle{$t}[$m][$f]<$minangle) {
+		$minangle = $angle{$t}[$m][$f];
+	      }
+	      $histogramindex = int($angle{$t}[$m][$f]/$histres);
+	      $histogram{$t}[$f][$histogramindex]++;
+	      $av_angle{$t}[$f] += $angle{$t}[$m][$f];
+	    }# done for $m
+	    $av_angle{"all"}[$f]         += $av_angle{$t}[$f];
+	    $av_angle{$t}[$f] /= $mol_numents[$t];
+	    # caution: the rolling average (rav) is divided by the number of frames during output below
+	    $rav_angle{$t}[$f] = $rav_angle{$t}[$f-1] + $av_angle{$t}[$f];
+	  }# fi check whether PA
+	}# done for $t
+      }#fi check $startframe
+      #output single molecule
+	$av_angle{"all"}[$f] /= $numpas;
+	$rav_angle{"all"}[$f] = $rav_angle{"all"}[$f-1] + $av_angle{"all"}[$f];
+	if($splitjob and not $heatup) {
+	  $percent = ($frame[$f]-$startframe)/$numframes*100;
+	  if($percent>=$nextpercent) {
+	    print "$nextpercent percent of total job done\n";
+	    $nextpercent+=5;
+	  }
+	}
+	$f++
+    } else { # if the frame does not begin with "timestep"
+      print "**** error: while reading HISTORY file!\n";
+      exit 1;
+    }
+    if(not $_=<HISTORY> or $err) { 
+      last; 
+    }
+    # output HISTORY file with imaged molecules
+#     for($t=0;$t<$field_nummols;$t++) {
+#       for($m=0;$m<$mol_numents[$t];$m++) {
+# 	# make molecule whole again
+# 	for($a=0;$a<$mol_numatoms[$t];$a++) {
+# 	  printf TEST "%-8s%10u%12.6f%12.6f\n",$cdata[$t][$m][$a][9],$cdata[$t][$m][$a][12],$cdata[$t][$m][$a][10],$cdata[$t][$m][$a][11];
+# 	  printf TEST "%12.4g%12.4g%12.4g\n",$cdata[$t][$m][$a][0],$cdata[$t][$m][$a][1],$cdata[$t][$m][$a][2];
+# 	  if($trajkey>0) {
+# 	    printf TEST "%12.4g%12.4g%12.4g\n",$cdata[$t][$m][$a][3],$cdata[$t][$m][$a][4],$cdata[$t][$m][$a][5];
+# 	    if($trajkey>1) {
+# 	      printf TEST "%12.4g%12.4g%12.4g\n",$cdata[$t][$m][$a][6],$cdata[$t][$m][$a][7],$cdata[$t][$m][$a][8];
+# 	    }
+# 	  }
+# 	}
+#       }
+#     }
+  };
+  $starttime = $time[$f-1];
+  close(HISTORY);
+}
+
+$totframes=$f;
+
+############### generate the output files #####################################
+
+if(not -d $outdir) {
+  mkdir $outdir or die "cannot create output-directory: $!";
+}
+
+foreach $key ( keys %av_angle ) {
+  open( AV_ANGLE,">","$outdir/av_angle_$mol_name[$key]");
+  print AV_ANGLE "# average tilt angle for $mol_numents[$key] entities of $mol_name[$key]\n";
+  printf  AV_ANGLE "#%12s %16s\n", 'time [ps]', 'tilt angle [deg]';
+  open(RAV_ANGLE,">","$outdir/rav_angle_$mol_name[$key]");
+  print RAV_ANGLE "# rolling average tilt angle for $mol_numents[$key] entities of $mol_name[$key]\n";
+  printf RAV_ANGLE "#%12s %16s\n", 'time [ps]', 'tilt angle [deg]';
+  for($f=0;$f<$totframes;$f++) {
+    if(defined( $av_angle{$key}[$f])) { printf  AV_ANGLE "%13.4f %13.10f\n",$time[$f],($av_angle{$key}[$f]);}
+    if(defined($rav_angle{$key}[$f])) { printf RAV_ANGLE "%13.4f %13.10f\n",$time[$f],($rav_angle{$key}[$f]/($f+1));}
+  }
+  close(AV_ANGLE, RAV_ANGLE);
+}
+
+# print histograms
+$minindex = int($minangle/$histres)-1;
+$minindex = 0 if($minindex<0);
+$maxindex = int($maxangle/$histres)+1;
+print "$minangle $maxangle\n";
+foreach $key ( keys %histogram ) {
+  open( HISTOGRAM,">","$outdir/histogram_$mol_name[$key]");
+  for($f=0;$f<$totframes;$f++) {
+    $checknummols=0;
+    print HISTOGRAM "# timestep $f ($time[$f] ps)\n";
+    for($i=$minindex;$i<=$maxindex;$i++) {
+      printf HISTOGRAM "%13.4f %13u\n",$i*$histres,$histogram{$key}[$f][$i];
+      $checknummols+=$histogram{$key}[$f][$i];
+    }
+    if($checknummols != $mol_numents[$key]) {
+      print "**** error: $mol_numents[$key] molecules expected but only $checknummols found\n";
+      print "            for molecule $mol_name[$key] and histogram frame $f.\n";
+      exit 1;
+    }
+    print HISTOGRAM "\n\n";
+  }
+}
+
+
+# mkdir "$outdir/single_molecules" if(not -d "$outdir/single_molecules");
+foreach $key ( keys %histogram ) {
+  open(TEST, ">", "$outdir/angle_$mol_name[$key]");
+  print TEST "# tilt angles for single molecules of type $mol_name[$key]\n";
+  for($i=0;$i<$mol_numents[$key];$i++) {
+    print TEST "# molecule number $i\n";
+    for($f=0;$f<$totframes;$f++) {
+      printf  TEST "%20.12f %13.12f\n",$time[$f],($angle{$key}[$i][$f]);
+    }
+    print TEST "\n\n";
+  }
+  close(TEST);
+}

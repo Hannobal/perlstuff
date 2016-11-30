@@ -1,0 +1,116 @@
+#!/usr/bin/perl
+if($#ARGV<5) {
+  print "1. dl_poly REVCON-file\n";
+  print "2. repetitions in x- and y-direction (integer)\n";
+  print "3. thickness of the slab in Angstrom\n";
+  print "4. output-file with ending\n";
+  print "5. output-format-key (0=xyz 1=dl_poly-CONFIG)\n";
+  exit;
+}
+if($ARGV[1]<1 or $ARGV[2]<1) {
+  print "repetitions must be >= 1\n";
+  exit;
+}
+if($ARGV[3]<2) {
+  print "You don't really want a slab of only $ARGV[3] angstroms thick...\n";
+  exit;
+}
+if($ARGV[5]>1) {
+  print "output format was not recognized\n";
+  print "allowed: 0 => xyz 1 => dl_poly-CONFIG\n";
+  exit;
+}
+$thickness = $ARGV[3];
+open(REVCON, "<", $ARGV[0]) or die "Can't open REVCON-file: $!";
+open(OUTPUT, ">", $ARGV[4]) or die "Can't open $ARGV[4]: $!";
+open(INFO, ">", $ARGV[4].".info") or die "Can't open info-file ($ARGV[4].info): $!";
+$title=<REVCON>;
+$_=<REVCON>;
+($REVCONkey,$periodic_key) = /\s*(\S*)\s*(\S*)\s*\S*\s*\S*/;
+for($j=0;$j<=2;$j++) {
+  $_=<REVCON>;
+  ($vec[$j][0], $vec[$j][1], $vec[$j][2]) = /\s*(\S*)\s*(\S*)\s*(\S*)/;
+}
+$xmin = 0;
+$ymin = 0;
+$zmax = -9999;
+while(<REVCON>) {
+  ($name) = /(\S*)\s*\S*/;
+  $_=<REVCON>;
+  ($x{$name}[$anz{$name}],$y{$name}[$anz{$name}],$z{$name}[$anz{$name}]) = /\s*(\S*)\s*(\S*)\s*(\S*)/;
+  #print "$z{$name}[$anz{$name}] ";
+  if($z{$name}[$anz{$name}] > $zmax) {
+    $zmax = $z{$name}[$anz{$name}];
+  }
+  for($i=0;$i<$REVCONkey;$i++) { #überspringe ggf. Zeilen für Geschwindigkeit und Kraft
+    $_ = <REVCON>;
+  }
+  $anz{$name}++;
+}
+$zmin = $zmax-$thickness;
+foreach $key (sort(keys %anz)) {
+  for($i=0;$i<$anz{$key};$i++) {
+    #$x{$key}[$anz{$key}] = $x{$key}[$anz{$key}]  $xmin;
+    #$y{$key}[$anz{$key}] = $y{$key}[$anz{$key}] - $ymin;
+    if($z{$key}[$i]>$zmin) {
+      $anzneeded++;
+      $new_anz{$key} += $ARGV[1]*$ARGV[2];
+    }
+  }
+}
+$anzneeded *= $ARGV[1];
+$anzneeded *= $ARGV[2];
+$sizex = $vec[0][0]+$vec[1][0]+$vec[2][0];
+$sizey = $vec[0][1]+$vec[1][1]+$vec[2][1];
+$dx = -0.5*($ARGV[1]-1)*$sizex;
+$dy = -0.5*($ARGV[2]-1)*$sizey;
+print INFO "cellvectors:\n";
+printf INFO "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[0][0], $ARGV[2]*$vec[0][1], $vec[0][2];
+printf INFO "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[1][0], $ARGV[2]*$vec[1][1], $vec[1][2];
+printf INFO "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[2][0], $ARGV[2]*$vec[2][1], $vec[2][2];
+print INFO "types and quantities of atoms\n";
+if($ARGV[5]==0) {
+  print OUTPUT " ".$anzneeded."\n\n";
+  foreach $key (sort(keys %anz)) {
+    printf INFO "%-8s %7u\n",$key, $new_anz{$key};
+    for($i=0;$i<$anz{$key};$i++) {
+      if($z{$key}[$i]>$zmin) {
+        for($ix=0;$ix<$ARGV[1];$ix++) {
+          for($iy=0;$iy<$ARGV[2];$iy++) {
+            $outx = $ix*$sizex+$dx+$x{$key}[$i];
+            $outy = $iy*$sizey+$dy+$y{$key}[$i];
+            $outz = $z{$key}[$i]-$zmax;
+            printf OUTPUT "%-5s %10.5f %10.5f %10.5f\n", $key,$outx,$outy,$z{$key}[$i];
+          }
+        }
+      }
+    }
+  }
+} elsif($ARGV[5]==1) {
+  printf OUTPUT "%-80s\n", "title";
+  printf OUTPUT "%10u", "2"; # OUTPUT file key
+  printf OUTPUT "%10u\n", "6"; # periodic boundary key
+  printf OUTPUT "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[0][0], $ARGV[2]*$vec[0][1], $vec[0][2];
+  printf OUTPUT "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[1][0], $ARGV[2]*$vec[1][1], $vec[1][2];
+  printf OUTPUT "%20.12e%20.12e%20.12e\n", $ARGV[1]*$vec[2][0], $ARGV[2]*$vec[2][1], $vec[2][2];
+  $j=131;
+  foreach $key (sort(keys %anz)) {
+    printf INFO "%-8s %7u\n",$key, $new_anz{$key};
+    for($i=0;$i<$anz{$key};$i++) {
+      if($z{$key}[$i]>$zmin) {
+        for($ix=0;$ix<$ARGV[1];$ix++) {
+          for($iy=0;$iy<$ARGV[2];$iy++) {
+            $outx = $ix*$sizex+$dx+$x{$key}[$i];
+            $outy = $iy*$sizey+$dy+$y{$key}[$i];
+            printf OUTPUT "%-8s%10u\n" ,$key,$j;
+            printf OUTPUT "%20.12g%20.12g%20.12g\n",$outx,$outy,$z{$key}[$i];
+            printf OUTPUT "%20.12g%20.12g%20.12g\n",0,0,0; # xyz of velocity
+            printf OUTPUT "%20.12g%20.12g%20.12g\n",0,0,0; # xyz of force
+            $j++;
+          }
+        }
+      }
+    }
+  }
+}
+close(REVCON, OUTPUT, INFO);
