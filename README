@@ -1,1 +1,24 @@
-# perlstuff
+---------------------------------- LICENSE ------------------------------------
+
+Copyright 2012-2016 Hanno Dietrich. This software is distributed under the GNU
+General Public License. It is an open-source code, distributed freely under the
+terms of the GNU Public License (GPL).
+
+-------------------------------- DISCLAIMER -----------------------------------
+
+This software is supplied "AS IS" without any warranties and support. We do
+neither assume any responsibility or liability for the use of the software, nor
+convey any license or title under any patent, copyright, or mask work right to
+the product.
+
+We reserve the right to make changes in the software without notification.
+We also make no representation or warranty that such application will be
+suitable for the specified use without further testing or modification.
+
+------------------------------- DOCUMENTATION ---------------------------------
+
+In order to make get the scripts working, you will need a version of perl with
+some basic modules installed. In addition, you will have to make the "modules"
+subfolder available to perl e.g. by setting the environment variable PERL5LIB:
+
+% export PERL5LIB="/home/perlstuff/modules"
