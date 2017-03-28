@@ -98,7 +98,7 @@ for($i=2;$i<@ARGV;$i++) {
       $i++;
       $outfld = $ARGV[$i];
       $loutfield = 1;
-    } case (/^-fr$/) { # output FIELD
+    } case (/^-fr$/) { # target frame
       $i++;
       $targetframe = $ARGV[$i];
       if(not check_integer($targetframe)) {
@@ -488,7 +488,7 @@ for($i=2;$i<@ARGV;$i++) {
     } case (/^-p$/ or /^--periodic[-_]key/) { #periodic_key
       print "changing periodic key\n";
       $i++;
-      $config_key[0] = $ARGV[$i];
+      $periodic_key[0] = $ARGV[$i];
       
     } case (/^-v/ or /^--cell[-_]vec/) { #cell vectors
       print "changing cell vectors\n";

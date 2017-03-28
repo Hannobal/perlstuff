@@ -30,7 +30,7 @@ $filenameinfld  = $ARGV[1];
 $filenameoutcfg = $ARGV[2];
 $filenameoutfld = $ARGV[3];
 $minpadist      = $ARGV[4];
-$maxohdist      = 2.5;
+$maxohdist      = 4;
 if(not check_real($minpadist)) {
   print "**** error: minimum distance between PAs must be a real number!\n";
   exit 99;
@@ -197,8 +197,8 @@ for($i=0;$i<@foundmol;$i++) {
     if($mol_atomdata[0][$t][$a][0] eq 'P5') {
       for $b (@{$mol_bondatoms[0][$t][$a]}) {
 	for $c (@{$mol_bondatoms[0][$t][$b]}) {
-	  if($mol_atomdata[0][$t][$c][0] eq 'HG') {
-	    push(@{$pahg[$i]},$c);
+	  if($mol_atomdata[0][$t][$c][0]=~/(HG|HO)/) {
+	    push(@{$pah[$i]},$c);
 	  }
 	}
       }
@@ -229,41 +229,40 @@ for($i=0;$i<@foundmol;$i++) {
   $td  = $foundmol[$i][1];
   $t2d = $foundmol[$i][2] if($ldouble);
   ############ first deprotonation ##########################
+  $mold=-1;
   loopmol : for($m=0;$m<$mol_numents[0][$t];$m++) {
     $mindistsq=9e20;
-    loopatoms : for($a=0;$a<$mol_numatoms[0][$t];$a++) {
-      if($cdata[0][$t][$m][$a][9] =~/HG/) {
-	# quickly check the distance
-	if($cdata[0][$t][$m][$a][2]>$zsurf+$maxohdist) {
-	  next loopatoms;
-	}
-	#find the nearest hydroxide oxygen
-	for($x=-1;$x<2;$x++) {
-	  for($y=-1;$y<2;$y++) {
-	    $shiftx = $x*$cell[0][0][0] + $y*$cell[0][1][0];
-	    $shifty = $x*$cell[0][0][1] + $y*$cell[0][1][1];
-	    for($i=0;$i<@candidates;$i++) {
-	      $n  = $candidates[$i];
-	      $dx = $cdata[0][$t][$m][$a][0] - $cdata[0][$toh][$n][$hydroxo][0] + $shiftx;
-	      $dy = $cdata[0][$t][$m][$a][1] - $cdata[0][$toh][$n][$hydroxo][1] + $shifty;
-	      $dz = $cdata[0][$t][$m][$a][2] - $cdata[0][$toh][$n][$hydroxo][2];
-	      $distsq = $dx*$dx + $dy*$dy + $dz*$dz;
-	      if($distsq<$mindistsq) {
-		$mindistsq = $distsq;
-		$nearest   = $i;
-		$ah        = $a;
-	      }
-	    } # end for $y
-	  } # end for $x
-	} # end for $n
-      } # end if HG
+    $mold++;
+    loopatoms : foreach $a (@{$pah[$i]}) {
+      # quickly check the distance
+      if($cdata[0][$t][$m][$a][2]>$zsurf+$maxohdist+3) {
+        next loopatoms;
+      }
+      #find the nearest hydroxide oxygen
+      for($x=-1;$x<2;$x++) {
+        for($y=-1;$y<2;$y++) {
+          $shiftx = $x*$cell[0][0][0] + $y*$cell[0][1][0];
+          $shifty = $x*$cell[0][0][1] + $y*$cell[0][1][1];
+          for($j=0;$j<@candidates;$j++) {
+            $n  = $candidates[$j];
+            $dx = $cdata[0][$t][$m][$a][0] - $cdata[0][$toh][$n][$hydroxo][0] + $shiftx;
+            $dy = $cdata[0][$t][$m][$a][1] - $cdata[0][$toh][$n][$hydroxo][1] + $shifty;
+            $dz = $cdata[0][$t][$m][$a][2] - $cdata[0][$toh][$n][$hydroxo][2];
+            $distsq = $dx*$dx + $dy*$dy + $dz*$dz;
+            if($distsq<$mindistsq) {
+              $mindistsq = $distsq;
+              $nearest   = $j;
+              $ah        = $a;
+            }
+          } # end for $y
+        } # end for $x
+      } # end for $n
     } #end for $a
     if(sqrt($mindistsq)>$maxohdist) {
-      print "**** error: no suitable hydroxide found in vicinity of $mol_name[0][$t] number $m!\n";
-      $err=1;
+      print "**** error: no suitable hydroxide found in vicinity of $mol_name[0][$t] number $mold!\n";
       next;
     }
-    $changed=1;
+    $changed++;
     @{$water[0]}=@{dclone \@{$cdata[0][$toh][$candidates[$nearest]]}};
     push(@remohs,splice(@candidates,$nearest,1));
     push(@{$water[0]},splice(@{$cdata[0][$t][$m]},$ah,1)); # shift proton
@@ -336,7 +335,7 @@ for($i=0;$i<@foundmol;$i++) {
       } # end if HG
     } #end for $a
     next if(sqrt($mindistsq)>$maxohdist);
-    $changed=1;
+    $changed++;
     @{$water[0]}=@{dclone \@{$cdata[0][$toh][$candidates[$nearest]]}};
     push(@remohs,splice(@candidates,$nearest,1));
     push(@{$water[0]},splice(@{$cdata[0][$td][$m]},$ah,1)); # shift proton
@@ -357,7 +356,7 @@ for($i=0;$i<@foundmol;$i++) {
 } #end for $i
 
 exit 1 if($err);
-if($changed) {
+if($changed>0) {
   # remove hydroxides
   @remohs = sort {$a <=> $b} @remohs;
   for($i=$#remohs;$i>=0;$i--) {
@@ -368,6 +367,7 @@ if($changed) {
   }
   write_config_file($filenameoutcfg,0,$config_title[0]);
   write_field_file($filenameoutfld,0);
+  print "transfered $changed protons\n";
   exit 0;
 } else {
   print "**** error: no changes made!\n";

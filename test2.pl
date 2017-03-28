@@ -3,7 +3,7 @@
 use dlpoly_utility;
 use hanno_utility;
 use Math::Trig;
-use Math::Matrix;
+# use Math::Matrix;
 # use PDL;
 
 # $a= Math::MatrixReal->new_from_rows([[1,0],[cos(pi/3.0),sin(pi/3.0)]]);
@@ -39,7 +39,17 @@ use Math::Matrix;
 # @vec2=rotate_vector(\@vec,\@mat3);
 # print join(" ",@vec2),"\n";
 
-$path='filename';
-if($path=~/^(.*)\/(.*)$/) {
-  print $1, "   ",$2,"\n";
+$mxblock=5;
+@res=();
+$ncurves=();
+for($b=0;$b<$mxblock;$b++) {
+  @{$data[$b]}=read_data_file($ARGV[0],"#",$b);
+  for($l=0;$l<@{$data[$b]};$l++) {
+    $res[$l]+=$data[$b][$l][1];
+    $ncurves[$l]++;
+  }
+}
+$av=$res[0]/$ncurves[0];
+for($l=0;$l<@res;$l++) {
+  print $data[0][$l][0]," ",$res[$l]," ",$res[$l]/$ncurves[$l]/$av,"\n";
 }

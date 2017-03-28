@@ -10,10 +10,12 @@ if($#ARGV<0) {
   print "the input format is:\n",
   " 1. input file\n",
   " 2. output directory\n",
+  "-n         include numeric subdirectories\n",
   "-s <int>   start value in row 1\n",
   "-e <int>   end value in row 1\n",
   "-m set the point at min value of range instead of centered\n",
   "-o <real>  offset: shifts the values by this number\n",
+  "-c <expr>  define a condition (e.g. \$2+$4<3)\n",
   "-<expr>    <resolution> <output filename>\n\n",
   "expr can be a row number starting from 1 (e.g. 2) or an expression with row e.g. '\$2+\$1/2'\n",
   "you may have to put the argument in quotes (e.g. '-(\$2+\$1)/2)'\n";
@@ -22,17 +24,21 @@ if($#ARGV<0) {
 
 $infilename = $ARGV[0];
 $outdir     = $ARGV[1];
-@indices  = ();
-@histres  = ();
-@outfiles = ();
-$lminval  = 0;
-$offset   = 0;
-
-open(INPUT,"<",$infilename) or die "**** error: Can't open input file $infilename!";
+@indices    = ();
+@rowflags   = ();
+@histres    = ();
+@outfiles   = ();
+@conditions = ();
+@condflags  = ();
+$lminval    = 0;
+$offset     = 0;
+$incndirs   = 0;
 
 for($i=2;$i<@ARGV;$i++) {
   switch($ARGV[$i]) {
-    case (/^-s$/) { # start frame
+    case (/^-n$/) {
+      $incndirs=1;
+    }case (/^-s$/) { # start frame
       $i++;
       $startframe = $ARGV[$i];
     } case (/^-e$/) { # end frame
@@ -43,6 +49,13 @@ for($i=2;$i<@ARGV;$i++) {
     } case (/^-o$/) { # offset
       $i++;
       $offset = $ARGV[$i];
+    } case (/^-c$/) {
+      $i++;
+      $expr = $ARGV[$i];
+      push(@condflags,$expr);
+      $expr =~ s/\$(\d+)/\$linedata[\$$1]/g;
+      $expr =~ s/\$(\d+)/($1-1)/eg;
+      push(@conditions,$expr);
     } else {
       push(@rowflags,substr($ARGV[$i],1));
       if($ARGV[$i]=~/^-(\d+)$/) {
@@ -62,31 +75,56 @@ for($i=2;$i<@ARGV;$i++) {
     }
   }
 }
-print join("\n",@indices),"\n";# exit;
-open(INPUT,"<",$infilename) or die "**** error: Can't open input file!";
 
-$minframe=9e90;
-$maxframe=-9e20;
-$line=0;
-while(<INPUT>) {
-  $_ =~ s/^\s+//;
-  $_ =~ s/\s+$//;
-  next if(length($_)==0);
-  next if(/^#/);
-  @linedata = split(/\s+/,$_);
-  next if(not check_real($linedata[0]));
-  next if($linedata[0]<$startframe);
-  last if($linedata[0]>$endframe);
-  $minframe=min($minframe,$linedata[0]);
-  $maxframe=max($maxframe,$linedata[0]);
-  @{$data[$line]} = @linedata;
-  for($i=0;$i<@indices;$i++) {
-    $minval[$i] = min($minval[$i],eval($indices[$i]));
-  }
-  $line++;
+print "parsed expressions for histograms:\n";
+print join("\n",@indices),"\n";
+if(@conditions) {
+  print "parsed expressions for conditions:\n";
+  print join("\n",@conditions),"\n";
 }
-close(INPUT);
-$numframes = $line;
+
+if($incndirs) {
+  @directories=get_numeric_directories(".",$startframe,$endframe);
+  if(not @directories) {
+    print "**** warning: no suitable directories found!\n";
+  }
+} else {
+  @directories=(".");
+}
+
+$numframes=0;
+foreach $dir (@directories) {
+  if(not -e "$dir/$infilename") {
+    print "**** warning: $dir/$infilename does not exist\n";
+    next;
+  }
+  open(INPUT,"<","$dir/$infilename") or die "**** error: Can't open file $dir/$infilename!";
+
+  $minframe=9e90;
+  $maxframe=-9e20;
+  readfile:while(<INPUT>) {
+    $_ =~ s/^\s+//;
+    $_ =~ s/\s+$//;
+    next if(length($_)==0);
+    next if(/^#/);
+    @linedata = split(/\s+/,$_);
+    next if(not check_real($linedata[0]));
+    next if($linedata[0]<$startframe);
+    last if($linedata[0]>$endframe);
+    for($i=0;$i<@conditions;$i++) {
+      next readfile unless(eval($conditions[$i]));
+    }
+    $minframe=min($minframe,$linedata[0]);
+    $maxframe=max($maxframe,$linedata[0]);
+    @{$data[$numframes]} = @linedata;
+    for($i=0;$i<@indices;$i++) {
+      $minval[$i] = min($minval[$i],eval($indices[$i]));
+    }
+    $numframes++;
+  }
+  close(INPUT);
+}
+
 for($i=0;$i<@indices;$i++) {
   $minval[$i] = $histres[$i]*(int($minval[$i]/$histres[$i])-1);
 }
@@ -111,6 +149,10 @@ for($i=0;$i<@indices;$i++) {
   print $fhhist "# histogram from $numframes frames in between $startframe and $endframe with resolution $histres[$i]\n",
                 "# of row $rowflags[$i] in file $infilename\n";
   printf $fhhist "# %18s %10s %10s\n", "value", "norm. cnt", "count";
+  if(@conditions) {
+    print $fhhist "# conditions:\n";
+    print $fhhist "# ",join("\n# ",@condflags),"\n";
+  }
   for($j=$histminindex[$i];$j<=$histmaxindex[$i];$j++) {
     if($lminval) {
       printf $fhhist "%20.8g %10.7f %10u\n", $histres[$i]*($j-0.5)+$minval[$i], $histogram[$i][$j], $histnum[$i][$j];

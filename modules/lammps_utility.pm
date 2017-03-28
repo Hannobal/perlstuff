@@ -17,7 +17,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw(@lmp_numstyles @lmp_styles @lmp_coeffs $lmp_units @lmp_fixes
 @lmp_variables @lmp_units @lmp_atomtypes @ldata @ldata_names
 
-read_lammpstrj_timestep read_dcd_timestep close_dcd_file
+read_lammpstrj_timestep read_dcd_timestep find_last_dcd_timestep close_dcd_file
 read_logfile);
 
 our(@lmp_numstyles,@lmp_styles,@lmp_coeffs,$lmp_units,@lmp_fixes,%dcd_natoms,
@@ -54,6 +54,7 @@ sub read_lammpstrj_timestep {
   @{$size[$ci]}  = ();
   @{$minpos[$ci]}=( 9e20, 9e20, 9e20);
   @{$maxpos[$ci]}=(-9e20,-9e20,-9e20);
+  undef $periodic_key[$ci];
   $frame_numatoms[$ci]=-1;
   
   $frame_number[$ci]=<$filehandle>; $frame_number[$ci]=~s/\s+$//;
@@ -185,7 +186,6 @@ sub read_lammpstrj_timestep {
 }
 
 sub read_dcd_header {
-  print "reading header\n";
   my $fh = $_[0];
   my($bytes,$bytes_read,$is_charmm,$extra_block,$has_4dims);
   $bytes_read = read($fh, $bytes, 88);
@@ -233,7 +233,6 @@ sub read_dcd_header {
     $dcd_title{$fh}[$i]=$title[$i];
   }
   $dcd_frame{$fh}=0;
-  print "... done\n";
   return 0;
 }
 
@@ -241,13 +240,12 @@ sub read_dcd_timestep {
   my $fh=$_[0];
   my $fi=$_[1];
   my $ci=$_[2];
-  my($bytes,$bytes_read);
+  my($bytes,$bytes_read,@coords);
   return 2 if($ci<0);
   return 3 unless(defined($fh));
   
   if(not defined $dcd_natoms{$fh}) {
     if(read_dcd_header($fh)!=0) {
-      print "**** error reading header of dcd file!\n";
       return 4;
     }
   }
@@ -270,20 +268,21 @@ sub read_dcd_timestep {
   @{$size[$ci]}  = ();
   @{$minpos[$ci]}=( 9e20, 9e20, 9e20);
   @{$maxpos[$ci]}=(-9e20,-9e20,-9e20);
-  undef $frame_number[0];
-  undef $frame_numatoms[0];
+  undef $frame_number[$ci];
+  undef $frame_numatoms[$ci];
+  undef $periodic_key[$ci];
   
   if($dcd_extra_block{$fh}) {
     $bytes_read = read($fh, $bytes, 4);
     unless(unpack('l',$bytes)==48) {# here must be "48"
-      print "**** error: expected \"48\" in extra block of dcd file!";
+      print "**** error: expected \"48\" in extra block of dcd file!\n";
       return 1;
     }
     $bytes_read = read($fh, $bytes, 48);
     my @d=unpack("d d d d d d",$bytes);
     $bytes_read = read($fh, $bytes, 4);
     unless(unpack('l',$bytes)==48) {# here must be "48"
-      print "**** error: expected \"48\" in extra block of dcd file!";
+      print "**** error: expected \"48\" in extra block of dcd file!\n";
       return 1;
     }
     @{$cell[$ci]}=calc_cell_vecs($d[0],$d[2],$d[5],acos($d[4]),acos($d[3]),acos($d[1]));
@@ -292,77 +291,58 @@ sub read_dcd_timestep {
     $size[$ci][2] = ($cell[$ci][0][2] + $cell[$ci][1][2] + $cell[$ci][2][2])/2;
   }
   
+  for(my $c=0;$c<3;$c++) {
+    $bytes_read = read($fh, $bytes, 4);
+    $nbytes = unpack('l',$bytes);
+    unless($nbytes/4==$dcd_natoms{$fh}) { # must be 4*N bytes for x/y/z arrays
+      print "**** error: unexpected end of dcd file!\n";
+      return 1;
+    }
+    $bytes_read = read($fh, $coords[$c], $nbytes);
+    unless($bytes_read==$nbytes) {
+      print "**** error: unexpected end of dcd file!\n";
+      return 1;
+    }
+    $bytes_read = read($fh, $bytes, 4);
+    unless($nbytes/4==$dcd_natoms{$fh}) {
+      print "**** error: unexpected end of dcd file!\n";
+      return 1;
+    }
+  }
   
   if($fi<0) {
-    for(my $c=0;$c<3;$c++) {
-      $bytes_read = read($fh, $bytes, 4);
-      $nbytes = unpack('l',$bytes);
-      unless($nbytes/4==$dcd_natoms{$fh}) { # must be 4*N bytes for x/y/z arrays
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
-      $bytes_read = read($fh, $bytes, $nbytes);
-      unless($bytes_read==$nbytes) {
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
-      for(my $i=0;$i<$dcd_natoms{$fh};$i++) {
-        $cdata[$ci][0][0][$i][$c] = unpack("\@".($i*4)."f",$bytes);
+    for(my $i=0;$i<$dcd_natoms{$fh};$i++) {
+      for(my $c=0;$c<3;$c++) {
+        $cdata[$ci][0][0][$i][$c] = unpack("\@".($i*4)."f",$coords[$c]);
+        $cdata[$ci][0][0][$i][11] = $i;
         $minpos[$ci][$c] = $cdata[$ci][0][0][0][$c] if($cdata[$ci][0][0][0][$c]<$minpos[$ci][$c]);
         $maxpos[$ci][$c] = $cdata[$ci][0][0][0][$c] if($cdata[$ci][0][0][0][$c]>$maxpos[$ci][$c]);
       }
-      $bytes_read = read($fh, $bytes, 4);
-      unless($nbytes/4==$dcd_natoms{$fh}) {
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
     }
   } else {
+    my $i=0;
     my $molindex = 0;
     for(my $t=0;$t<$field_nummols[$fi];$t++) {
       @{$cdata[$ci][$t]}=();
       for(my $m=0;$m<$mol_numents[$fi][$t];$m++) {
         @{$cdata[$ci][$t][$m]}=();
         for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
+          for(my $c=0;$c<3;$c++) {
+            $cdata[$ci][$t][$m][$a][$c] = unpack("\@".($i*4)."f",$coords[$c]);
+          }
           $cdata[$ci][$t][$m][$a][9]  = $mol_atomdata[$fi][$t][$a][0];
           $cdata[$ci][$t][$m][$a][10] = $molindex;
+          $cdata[$ci][$t][$m][$a][11] = $i;
           $cdata[$ci][$t][$m][$a][12] = $mol_atomdata[$fi][$t][$a][1];
           $cdata[$ci][$t][$m][$a][13] = $mol_atomdata[$fi][$t][$a][2];
+          $i++;
         }
         $molindex++;
       }
     }
-    for(my $c=0;$c<3;$c++) {
-      $bytes_read = read($fh, $bytes, 4);
-      $nbytes = unpack('l',$bytes);
-      unless($nbytes/4==$dcd_natoms{$fh}) { # must be 4*N bytes for x/y/z arrays
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
-      $bytes_read = read($fh, $bytes, $nbytes);
-      unless($bytes_read==$nbytes) {
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
-      my $i=0;
-      for(my $t=0;$t<$field_nummols[$fi];$t++) {
-        for(my $m=0;$m<$mol_numents[$fi][$t];$m++) {
-          for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
-            $cdata[$ci][$t][$m][$a][$c] = unpack("\@".($i*4)."f",$bytes);
-            $minpos[$ci][$c] = $cdata[$ci][$t][$m][$a][$c] if($cdata[$ci][$t][$m][$a][$c]<$minpos[$ci][$c]);
-            $maxpos[$ci][$c] = $cdata[$ci][$t][$m][$a][$c] if($cdata[$ci][$t][$m][$a][$c]>$maxpos[$ci][$c]);
-            $i++;
-          }
-        }
-      }
-      $bytes_read = read($fh, $bytes, 4);
-      unless($nbytes/4==$dcd_natoms{$fh}) {
-        print "**** error: unexpected end of dcd file!\n";
-        return 1;
-      }
-    }
   }
   $frame_number[$ci]=$dcd_startframe{$fh}+$dcd_frame{$fh}*$dcd_step{$fh};
+  $frame_numatoms[$ci]=$dcd_natoms{$fh};
   if($dcd_extra_block{$fh}) {
     if(check_orthogonal($ci)) {
       $periodic_key[$ci]=2;
@@ -375,6 +355,34 @@ sub read_dcd_timestep {
   $config_key[$ci]=0;
   $dcd_frame{$fh}++;
   return 0;
+}
+
+sub find_last_dcd_timestep {
+  my $fh=$_[0];
+  my($bytes,$bytes_read,$currpos,$currposold,$err);
+  
+  return 3 unless(defined($fh));
+  
+  if(not defined $dcd_natoms{$fh}) {
+    if(read_dcd_header($fh)!=0) {
+      return 4;
+    }
+  }
+  # check whether we're at the end of the file
+  $err=0;
+  $currpos=tell($fh);
+  $currposold=$currpos;
+  while($err==0) {
+    if($dcd_extra_block{$fh}) {
+      $bytes_read = read($fh, $bytes, 56);
+    }
+    $bytes_read = read($fh, $bytes, 24+$dcd_natoms{$fh}*12);
+    last if($bytes_read!=24+$dcd_natoms{$fh}*12);
+    $currposold=$currpos;
+    $dcd_frame{$fh}++;
+    $currpos=tell($fh);
+  }
+  seek($fh,$currposold,0);
 }
 
 sub close_dcd_file {

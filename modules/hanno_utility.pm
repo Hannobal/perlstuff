@@ -20,7 +20,8 @@ our @EXPORT = qw(@histogram @histminindex @histmaxindex @histnumtotal @histnum
     subarray min min_nonrecursive max vector_projection vector_projection_plane vector_add
     vector_subst parse_intlist randomgauss histogram_normalize_numdata
     histogram_estimate_stdev read_data_file matmul round generate_octahedron
-    generate_prism generate_tetrahedron);
+    generate_prism generate_tetrahedron matrix_det matrix_invert matrix_multiply
+    matrix_transpose);
 
 our $VERSION = '0.01';
 
@@ -329,7 +330,7 @@ sub get_numeric_directories {
   my $endframe   = $_[2]; # optional
   my $prefix     = $_[3]; # optional
   my $suffix     = $_[4]; # optional
-  my($i,$dir,@files,$startdirindex,$enddirindex);
+  my($i,$dir,@files,$startdirindex,$enddirindex,$tmp);
   if(not opendir($dir, $inputdir)) {
     print "**** error: could not open directory $inputdir\n";
     @files=();
@@ -339,9 +340,10 @@ sub get_numeric_directories {
   closedir($dir);
 # find the relevant folders
   for($i=0;$i<@files;$i++) {
-    $files[$i]=~s/^$prefix// if(defined($prefix));
-    $files[$i]=~s/$suffix$// if(defined($suffix));
-    if (not check_real($files[$i])) {
+    $tmp=$files[$i];
+    $tmp=~s/^$prefix// if(defined($prefix));
+    $tmp=~s/$suffix$// if(defined($suffix));
+    if (not check_real($tmp)) {
       splice(@files,$i,1);
       $i--;
     }
@@ -738,6 +740,88 @@ sub generate_octahedron {
   push(@points,[0,0,$r*$x]);
   push(@points,[0,0,-$r*$x]);
   return @points;
+}
+
+sub matrix_multiply {
+  my @m1=@{$_[0]};
+  my @m2=@{$_[1]};
+  return undef if($#{$m1[0]}!=$#m2);
+  my @res=();
+  if(ref($m2[0]) eq "ARRAY") {
+    for(my $i=0;$i<@m1;$i++) {
+      for(my $k=0;$k<@{$m2[0]};$k++) {
+        $res[$i][$k]=0;
+        for(my $j=0;$j<@m2;$j++) {
+          $res[$i][$k] += $m1[$i][$j]*$m2[$j][$k];
+        }
+      }
+    }
+  } else { # we have a vector
+    for(my $i=0;$i<@m1;$i++) {
+      $res[$i]=0;
+      for(my $j=0;$j<@m2;$j++) {
+        $res[$i] += $m1[$i][$j]*$m2[$j];
+      }
+    }
+  }
+  return @res;
+}
+
+sub matrix_det {
+  if($#_==1) { # assume 2x2-matrix
+    return $_[0][0]*$_[1][1]-$_[0][1]*$_[1][0];
+  } if($#_==2) { # assume 3x3-matrix
+    return $_[0][0]*$_[1][1]*$_[2][2]
+          +$_[0][1]*$_[1][2]*$_[2][0]
+          +$_[0][2]*$_[1][0]*$_[2][1]
+          -$_[2][0]*$_[1][1]*$_[0][2]
+          -$_[2][1]*$_[1][2]*$_[0][0]
+          -$_[2][2]*$_[1][0]*$_[0][1];
+  } else {
+    return undef;
+  }
+}
+
+sub matrix_invert {
+  my $f=matrix_det(@_);
+  return undef if(not defined($f) or $f==0);
+  $f=1.0/$f;
+  my @inv=();
+  if($#_==1) { # assume 2x2-matrix
+    $inv[0][0] =  $f*$_[1][1];
+    $inv[0][1] = -$f*$_[0][1];
+    $inv[1][0] = -$f*$_[1][0];
+    $inv[1][1] =  $f*$_[0][0];
+  } elsif($#_==2) { # assume 3x3-matrix
+    $inv[0][0] = -1*($_[1][1]*$_[2][2]-$_[1][2]*$_[2][1]);
+    $inv[0][1] = -1*($_[0][2]*$_[2][1]-$_[0][1]*$_[2][2]);
+    $inv[0][2] = -1*($_[0][1]*$_[1][2]-$_[0][2]*$_[1][1]);
+    $inv[1][0] = -1*($_[1][2]*$_[2][0]-$_[1][0]*$_[2][2]);
+    $inv[1][1] = -1*($_[0][0]*$_[2][2]-$_[0][2]*$_[2][0]);
+    $inv[1][2] = -1*($_[0][2]*$_[1][0]-$_[0][0]*$_[1][2]);
+    $inv[2][0] = -1*($_[1][0]*$_[2][1]-$_[1][1]*$_[2][0]);
+    $inv[2][1] = -1*($_[0][1]*$_[2][0]-$_[0][0]*$_[2][1]);
+    $inv[2][2] = -1*($_[0][0]*$_[1][1]-$_[0][1]*$_[1][0]);
+  } else {
+    return undef;
+  }
+  return @inv
+}
+
+sub matrix_transpose {
+  my @res=();
+  if(ref($_[0]) eq "ARRAY") {
+    for(my $i=0;$i<@_;$i++) {
+      for(my $j=0;$j<@{$_[$i]};$j++) {
+        $res[$j][$i]=$_[$i][$j];
+      }
+    }
+  } else {
+    for(my $i=0;$i<@_;$i++) {
+      $res[0][$i]=$_[$i];
+    }
+  }
+  return @res;
 }
 
 1;

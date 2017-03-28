@@ -43,10 +43,10 @@ our @EXPORT = qw(@cell @size @config_key @config_title @periodic_key @cdata @fra
     read_statis_timestep read_xyz_timestep write_xyz_timestep connection_depth calc_dihedral_angle
     read_control_file calc_dihedral_angle2 calc_temperature scale_temperature calc_rmsd calc_minmaxpos
     enlarge_system get_atom_list rotate_dihedral remap_molecule2 calc_dsq calc_dsq_orthocell
-    calc_dvec_orthocell calc_center_of_mass_orthocell cut_truncated_octahedron calc_cell_abc
-    calc_cell_vecs print_statis_data_header print_statis_data calc_angle calc_angle_orthocell
-    rotate_cell_vmd read_rdfdat_file print_rdfdat_data read_zdndat_file print_zdndat_data
-    check_orthogonal
+    calc_dvec_orthocell calc_dvec_orthocell_vec calc_center_of_mass_orthocell calc_dipole_moment
+    cut_truncated_octahedron calc_cell_abc calc_cell_vecs print_statis_data_header print_statis_data
+    calc_angle calc_angle_orthocell rotate_cell_vmd read_rdfdat_file print_rdfdat_data read_zdndat_file
+    print_zdndat_data check_orthogonal
     
     @mol2_name @mol2_numatoms @mol2_numbonds @mol2_numsubst @mol2_numfeat @mol2_numsets @mol2_moltype 
     @mol2_chargemethod @mol2_atomdata @mol2_bonddata @mol2_substdata @mol2_atomtypes @mol2_statusbits 
@@ -751,7 +751,7 @@ sub read_control_file {
 	$control_coulmethod[$ci]    = undef;
 	@{$control_coulmethod[$ci]} = ();
       } elsif($linedata[1]=~/^fic/i) {
-	$control_nofic[$ci]  = 1;
+	$control_nofic[$ci]  = $linedata[2];
       } elsif($linedata[1]=~/^link/i) {
 	$control_nolink[$ci] = 1;
       } elsif($linedata[1]=~/^vdw/i) {
@@ -2822,6 +2822,23 @@ sub calc_dsq_orthocell {
   return $dx*$dx + $dy*$dy + $dz*$dz;
 }
 
+sub calc_dvec_orthocell_vec {
+  # calc_dsq_orthocell_vec($ci, \@vec1, \@vec2);
+  return undef if(not @{$size[$_[0]]});
+  my @d;
+  for(my $c=0;$c<@{$_[1]};$c++) {
+    $d[$c]=$_[1][$c]-$_[2][$c];
+    if($periodic_key[$_[0]]!=0 and ($c!=2 or $periodic_key[$_[0]]!=6)) {
+      if($d[$c] < -$size[$_[0]][$c]) {
+        $d[$c] += 2*$size[$_[0]][$c];
+      } elsif($d[$c] > $size[$_[0]][$c]) {
+        $d[$c] -= 2*$size[$_[0]][$c];
+      }
+    }
+  }
+  return @d;
+}
+
 sub calc_center_of_mass_orthocell {
   # calc_center_of_mass_orthocell($ci, $fi, $t, $m [@atids])
   # !!! for use with remapped molecules only !!!
@@ -2872,6 +2889,22 @@ sub calc_center_of_mass_orthocell {
     }
   }
   return @com;
+}
+
+sub calc_dipole_moment {
+  # !!!! caution: molecules have to be remapped !!!!
+  my ($t,$m,$a,$ci,$fi,@vec);
+  $ci      = $_[0];
+  $fi      = $_[1];
+  $t       = $_[2];
+  $m       = $_[3];
+  @vec=(0,0,0);
+  for($a=0;$a<$mol_numatoms[$ci][$t];$a++) {
+    $vec[0]+=$cdata[$ci][$t][$m][$a][0]*$mol_atomdata[$fi][$t][$a][2];
+    $vec[1]+=$cdata[$ci][$t][$m][$a][1]*$mol_atomdata[$fi][$t][$a][2];
+    $vec[2]+=$cdata[$ci][$t][$m][$a][2]*$mol_atomdata[$fi][$t][$a][2];
+  }
+  return @vec;
 }
 
 sub cut_truncated_octahedron {

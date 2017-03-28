@@ -66,7 +66,7 @@ if($mode==0) {
 
   @minpos_tot = ( 9e20, 9e20, 9e20);
   @maxpos_tot = (-9e20,-9e20,-9e20);
-  printf "%-7s %14s %14s %14s %14s %14s %14s\n", 'name','min x','min y','min z','max x','max y','max z';
+  printf "%-7s %10s %10s %10s %10s %10s %10s\n", 'name','min x','min y','min z','max x','max y','max z';
   for($a=0;$a<$field_numatomtypes[0];$a++) {
     for($b=0;$b<@types;$b++) {
       if($field_atomtypes[0][$a] eq $types[$b]) {
@@ -76,8 +76,8 @@ if($mode==0) {
   # 	printf " %14s %14s %14s\n", '----------','----------','----------';
 	} else {
 	  printf "%-7s", $field_atomtypes[0][$a];
-	  printf " %14.5f %14.5f %14.5f",   @{$minpos{$field_atomtypes[0][$a]}};
-	  printf " %14.5f %14.5f %14.5f\n", @{$maxpos{$field_atomtypes[0][$a]}};
+	  printf " %10.5f %10.5f %10.5f",   @{$minpos{$field_atomtypes[0][$a]}};
+	  printf " %10.5f %10.5f %10.5f\n", @{$maxpos{$field_atomtypes[0][$a]}};
 	  for($c=0;$c<3;$c++) {
 	    $minpos_tot[$c] = $minpos{$field_atomtypes[0][$a]}[$c] if($minpos{$field_atomtypes[0][$a]}[$c]<$minpos_tot[$c]);
 	    $maxpos_tot[$c] = $maxpos{$field_atomtypes[0][$a]}[$c] if($maxpos{$field_atomtypes[0][$a]}[$c]>$maxpos_tot[$c]);
@@ -88,8 +88,8 @@ if($mode==0) {
     }
   }
   printf "%-7s", 'total';
-  printf " %14.5f %14.5f %14.5f",   @minpos_tot;
-  printf " %14.5f %14.5f %14.5f\n", @maxpos_tot;
+  printf " %10.5f %10.5f %10.5f",   @minpos_tot;
+  printf " %10.5f %10.5f %10.5f\n", @maxpos_tot;
 } else {
   for($t=0;$t<$field_nummols[0];$t++) {
     $cycle=1;
@@ -119,11 +119,11 @@ if($mode==0) {
   } # end for t
   @minpos_tot = ( 9e20, 9e20, 9e20);
   @maxpos_tot = (-9e20,-9e20,-9e20);
-  printf "%-15s %14s %14s %14s %14s %14s %14s\n", 'name','min x','min y','min z','max x','max y','max z';
+  printf "%-15s %10s %10s %10s %10s %10s %10s\n", 'name','min x','min y','min z','max x','max y','max z';
   for($u=0;$u<@types;$u++) {
     printf "%-15s", $types[$u];
-    printf " %14.5f %14.5f %14.5f",   @{$minpos{$types[$u]}};
-    printf " %14.5f %14.5f %14.5f\n", @{$maxpos{$types[$u]}};
+    printf " %10.5f %10.5f %10.5f",   @{$minpos{$types[$u]}};
+    printf " %10.5f %10.5f %10.5f\n", @{$maxpos{$types[$u]}};
     for($c=0;$c<3;$c++) {
       $minpos_tot[$c] = $minpos{$types[$u]}[$c] if($minpos{$types[$u]}[$c]<$minpos_tot[$c]);
       $maxpos_tot[$c] = $maxpos{$types[$u]}[$c] if($maxpos{$types[$u]}[$c]>$maxpos_tot[$c]);
@@ -131,7 +131,7 @@ if($mode==0) {
   }
   if($#types>0) {
     printf "%-15s", 'total';
-    printf " %14.5f %14.5f %14.5f",   @minpos_tot;
-    printf " %14.5f %14.5f %14.5f\n", @maxpos_tot;
+    printf " %10.5f %10.5f %10.5f",   @minpos_tot;
+    printf " %10.5f %10.5f %10.5f\n", @maxpos_tot;
   }
 }

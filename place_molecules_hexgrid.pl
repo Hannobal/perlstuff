@@ -34,8 +34,6 @@ $filenameoutcfg = $ARGV[3];
 $filenameoutfld = $ARGV[4];
 $gridspacing    = $ARGV[5];
 $zpos           = $ARGV[6];
-$xpos=0;
-$ypos=0;
 $molshiftvec[0]=0;
 $molshiftvec[1]=0;
 @islandcenter=(0,0);
@@ -164,17 +162,18 @@ switch($periodic_key[0]) {
   }
 }
 
+if(not defined($xpos)) {
+  $xpos=-$size[0][0]+0.5;
+}
+if(not defined($ypos)) {
+  $ypos=-$size[0][1]+0.5;
+}
+
 $molperiodicvec[0][0]=$gridspacing*cos($gridrot/180*pi);
 $molperiodicvec[0][1]=$gridspacing*sin($gridrot/180*pi);
 $molperiodicvec[1][0]=$gridspacing*cos($gridrot/180*pi+pi/3.0);
 $molperiodicvec[1][1]=$gridspacing*sin($gridrot/180*pi+pi/3.0);
 
-print "vecs:\n";
-print $molperiodicvec[0][0],"  ";
-print $molperiodicvec[0][1],"\n";
-print $molperiodicvec[1][0],"  ";
-print $molperiodicvec[1][1],"\n";
-print "\n";
 if($lredefine) {
   if($gridrot%180==0) { # grid along x-axis
     $n=2*$size[0][0]/$molperiodicvec[0][0];
@@ -203,10 +202,15 @@ if($lredefine) {
   }
 }
 
+print "vecs:\n";
+printf "%10.7f %10.7f (length: %10.7f)\n",@{$molperiodicvec[0]},vector_length(@{$molperiodicvec[0]});
+printf "%10.7f %10.7f (length: %10.7f)\n",@{$molperiodicvec[1]},vector_length(@{$molperiodicvec[1]});
+
 $imaxx = 100;
 $imaxy = 100;
 $i=0;
 
+$nmols=0;
 $pos[2]=$zpos;
 gridposy : for($iy=-$imaxy;$iy<=$imaxy;$iy++) {
   gridposx : for($ix=-$imaxx;$ix<=$imaxx;$ix++) {
@@ -238,6 +242,7 @@ gridposy : for($iy=-$imaxy;$iy<=$imaxy;$iy++) {
       }
     }
     # add a molecule at the new position
+    $nmols++;
     push(@{$finalpos},[@pos]);
     $m=@{$cdata[0][$foundmol]};
     @{$cdata[0][$foundmol][$m]} = mol2_to_cdata(0);
@@ -246,6 +251,9 @@ gridposy : for($iy=-$imaxy;$iy<=$imaxy;$iy++) {
     $mol_numents[0][$foundmol]++;
   }
 }
+
+$dens=$nmols/(4*$size[0][0]*$size[0][1])*100;
+printf "placed %u molecules (density %4.2f nm-2)\n",$nmols,$dens;
 
 write_config_file($filenameoutcfg,0,$config_title[0]);
 write_field_file($filenameoutfld,0);

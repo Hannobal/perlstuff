@@ -14,11 +14,13 @@ if($#ARGV<3) {
   print "4. name of output lammps files (*.data, *.in)\n";
   print "optional flags:\n";
   print "-d <str> dump as dcd (default), lammpstrj or xyz\n";
+  print "-ii      print only ii pairwise parameters and not ij\n";
   exit 1;
 }
 
 my($i);
-my $dump="dcd";
+my $dump   = "dcd";
+my $onlyii = 0;
 for($i=4;$i<@ARGV;$i++) {
   switch($ARGV[$i]) {
     case (/^-d$/i) {
@@ -28,6 +30,8 @@ for($i=4;$i<@ARGV;$i++) {
         print "**** error: invalid dump style\!\n";
         exit 1;
       }
+    } case (/^-ii$/i) {
+      $onlyii=1;
     } else {
       print "**** error: expected optional flag but got \"$ARGV[$i]\"!\n";
       exit 1;
@@ -40,15 +44,14 @@ exit 1 if(read_config_file($ARGV[0],0,0)!=0);
 $ARGV[2]=~s/(^\s+|\s+$)//g;
 if(length($ARGV[2]) > 0) {
   exit 1 if(read_control_file($ARGV[2],0)!=0);
-  write_lammps_data($ARGV[3],0,0,0,"metal","lammps test",$dump);
+  write_lammps_data($ARGV[3],0,0,0,"metal","lammps test",$dump,$onlyii);
 } else {
-  write_lammps_data($ARGV[3],0,0,-1,"metal","lammps test",$dump);
+  write_lammps_data($ARGV[3],0,0,-1,"metal","lammps test",$dump,$onlyii);
 }
 
 sub write_lammps_data {
-  my($fh_data,$fh_in,$fh_mols,$t,$m,$k,$l,$i,$j,$indexoffset,$numbondstyles,
-  $numanglestyles,$numdihedralstyles,$numpairstyles,$ifix,$fenergy,
-  $fvel,$fefield,$group_integrate,$cutglob,$rvdw,$coulmethod);
+  my($fh_data,$fh_in,$fh_mols,$t,$m,$k,$l,$i,$j,$indexoffset,$ifix,$fenergy,
+  $fvel,$fefield,$group_integrate,$cutglob,$rvdw,$coulstyle,$couladd);
   my $filename  = $_[0];
   my $ci        = $_[1]; # config data
   my $fi        = $_[2]; # field data
@@ -56,6 +59,9 @@ sub write_lammps_data {
   my $lunits    = $_[4];
   my $title     = $_[5];
   my $dumpstyle = $_[6];
+  my $onlyii    = 0;
+  $onlyii=$_[7] if($#_>6);
+  
   my $numatoms=0;
   my $numbonds=0;
   my $numangles=0;
@@ -68,16 +74,18 @@ sub write_lammps_data {
   my @paircoeff=();     # same as field_vdwdata except that the atom names are lammps atomtype indices
   my @frozenatoms=();
   my @frozenatomsmol=();
-  my %bondstyles=();
-  my %anglestyles=();
-  my %dihedralstyles=();
-  my %pairstyles=();
+  my @bondstyles=();
+  my @anglestyles=();
+  my @dihedralstyles=();
+  my $specialbonds=undef;
+  my @pairstyles=();
   my @impropercoeff=(); 
   my @mol_atomtype=();
   my @mol_bondcoeff=();
   my @mol_anglecoeff=();
   my @mol_dihedralcoeff=();
   my @usedtypes=();
+  my @molgroups=();
   my $ev = 1.60217657e-19; # j
   # determine unit conversion factors
   my $ftime   = 1.0e-12;
@@ -147,7 +155,7 @@ sub write_lammps_data {
   }
   
   if($oi<0 or $control_cutglob[$oi] == undef) {
-    $cutglob    = 20;
+    $cutglob    = 12;
   } else {
     $cutglob    = $control_cutglob[$oi];
   }
@@ -156,10 +164,35 @@ sub write_lammps_data {
   } else {
     $rvdw       = $control_rvdw[$oi];
   }
-  if($oi<0 or not defined($control_coulmethod[$oi])) {
-    $coulmethod = "coul";
+  if($oi<0) {
+    $coulstyle = "coul/dsf";
+    $couladd   = "0 $cutglob";
+  } elsif(not defined($control_coulmethod[$oi])) {
+    $coulstyle = undef;
+  } elsif($control_coulmethod[$oi]=~/^coul/) {
+    $coulstyle = "coul/cut";
+    $couladd   = "$cutglob";
+  } elsif($control_coulmethod[$oi]=~/^shift/) {
+    if($control_coulmethod[$oi]=~/^damp/) { # damped shifted force
+      $coulstyle = "coul/dsf";
+      $couladd   = "$control_coulprm[0][0] $cutglob";
+    } elsif($control_coulmethod[$oi]=~/prec/) { # damped shifted force w/ automatic parameter optim
+      $i = min(0.5,abs($control_coulprm[0][0])); #eps in define_system_module.f
+      $j = sqrt(abs(log($i*$cutglob))); #tol
+      $k = sqrt(abs(log($i*$cutglob*$j)))/$cutglob;
+      $coulstyle = "coul/dsf";
+      $couladd   = sprintf("%.5g %s",$k,$cutglob);
+    } else { # shifted force
+      $coulstyle = "coul/dsf";
+      $couladd   = "0 $cutglob";
+    }
+  } elsif($control_coulmethod[$oi]=~/^(ewald|spme|hke)/) {
+    print "**** error: ewald summation is not implemented (yet)!\n"; return 1;
   } else {
-    $coulmethod = $control_coulmethod[$oi];
+    print "**** warning: unknown coulomb method \"$coulstyle.\"\n";
+    print "              using shifted coulomb summation instead\n";
+    $coulstyle = "coul/dsf";
+    $couladd   = "0 $cutglob";
   }
   # check periodic cell
   if($periodic_key[$ci]>0) {
@@ -242,7 +275,8 @@ sub write_lammps_data {
       $i=find_lammps_bondtype($fi,$t,$k,\@bondcoeff);
       if($i<0) {
 	push(@bondcoeff,[@{$mol_bonddata[$fi][$t][$k]}]);
-	$bondstyles{$mol_bonddata[$fi][$t][$k][0]}=1;
+	push(@bondstyles,$mol_bonddata[$fi][$t][$k][0])
+          if(not contains(@bondstyles,$mol_bonddata[$fi][$t][$k][0]));
 	$i=$#bondcoeff;
       }
       $mol_bondcoeff[$t][$k] = $i;
@@ -251,7 +285,8 @@ sub write_lammps_data {
       $i=find_lammps_angletype($fi,$t,$k,\@anglecoeff);
       if($i<0) {
 	push(@anglecoeff,[@{$mol_angledata[$fi][$t][$k]}]);
-	$anglestyles{$mol_angledata[$fi][$t][$k][0]}=1;
+	push(@anglestyles,$mol_angledata[$fi][$t][$k][0])
+          if(not contains(@anglestyles,$mol_angledata[$fi][$t][$k][0]));
 	$i=$#anglecoeff;
       }
       $mol_anglecoeff[$t][$k] = $i;
@@ -260,16 +295,46 @@ sub write_lammps_data {
       $i=find_lammps_dihedraltype($fi,$t,$k,\@dihedralcoeff);
       if($i<0) {
 	push(@dihedralcoeff,[@{$mol_dihedraldata[$fi][$t][$k]}]);
-	$dihedralstyles{$mol_dihedraldata[$fi][$t][$k][0]}=1;
+	push(@dihedralstyles,$mol_dihedraldata[$fi][$t][$k][0])
+          if(not contains(@dihedralstyles,$mol_dihedraldata[$fi][$t][$k][0]));
 	$i=$#dihedralcoeff;
       }
       $mol_dihedralcoeff[$t][$k] = $i;
+      # check 1-4 scaling factors:
+      if($mol_dihedraldata[$fi][$t][$k][0]=~/^(ryck|rbf)/i) {
+        $i=6;
+      } elsif($mol_dihedraldata[$fi][$t][$k][0]=~/^(harm|hcos)/i) {
+        $i=7;
+      } elsif($mol_dihedraldata[$fi][$t][$k][0]=~/^cos/i) {
+        $i=8;
+      } elsif($mol_dihedraldata[$fi][$t][$k][0]=~/^opls/i) {
+        $i=9;
+      }
+      if(abs($mol_dihedraldata[$fi][$t][$k][$i]-0.833)<0.01 and $mol_dihedraldata[$fi][$t][$k][$i+1]==0.5) {
+        $j="amber";
+      } elsif($mol_dihedraldata[$fi][$t][$k][$i]==0 and $mol_dihedraldata[$fi][$t][$k][$i+1]==0) {
+        $j="charmm";
+      } elsif($mol_dihedraldata[$fi][$t][$k][$i]==1 and $mol_dihedraldata[$fi][$t][$k][$i+1]==1) {
+        $j="dreiding";
+      } else {
+        print "**** warning: unknown 1-4 scaling factors. Output for 'special_bonds' must be revised!\n";
+        $j="NEEDS REVISION";
+      }
+      if(not defined($specialbonds)) {
+        $specialbonds=$j;
+      } elsif($specialbonds!~/^NEEDS/ and $specialbonds ne $j) {
+        print "**** warning: mixed 1-4 scaling factors. Output for 'special_bonds' must be revised!\n";
+        $specialbonds="NEEDS REVISION";
+      }
     }
-    $indexoffset+=$mol_numatoms[$fi][$t]*$mol_numents[$fi][$t];
+    $i=$indexoffset+$mol_numatoms[$fi][$t]*$mol_numents[$fi][$t];
+    push(@molgroups,"group $mol_name[$fi][$t] id $indexoffset:$i");
+    $indexoffset=$i
   }
   
   # check vdw pairs
   for($i=0;$i<@{$field_vdwdata[$fi]};$i++) {
+    next if($onlyii and $field_vdwdata[$fi][$i][0] ne $field_vdwdata[$fi][$i][1]);
     next if(not contains(@usedtypes,$field_vdwdata[$fi][$i][0]) or not contains(@usedtypes,$field_vdwdata[$fi][$i][1]));
     if($field_vdwdata[$fi][$i][2]=~/lj/i and $field_vdwdata[$fi][$i][3]==0) {
       print "ignoring lj-potential $field_vdwdata[$fi][$i][0]-$field_vdwdata[$fi][$i][1] with epsilon=0\n";
@@ -280,20 +345,43 @@ sub write_lammps_data {
       $field_vdwdata[$fi][$i][0]." and ".$field_vdwdata[$fi][$i][1]."!\n";
       return 1;
     }
-    $pairstyles{$field_vdwdata[$fi][$i][2]}=1;
+    if($field_vdwdata[$fi][$i][2]=~/^lj/i or $i=~/^12-6/) {
+      $j="lj/cut";
+    } elsif($field_vdwdata[$fi][$i][2]=~/^buck/) {
+      $j="buck";
+    } elsif($field_vdwdata[$fi][$i][2]=~/^mors/) {
+      $j="morse";
+    } else {
+      print "**** error: unknown VDW type $i\n"; return 1;
+    }
+    push(@pairstyles,$j) if(not contains(@pairstyles,$j));
     foreach $k (find_lammps_atomtype_pair($field_vdwdata[$fi][$i][0],\@atomtypes)) {
       foreach $l (find_lammps_atomtype_pair($field_vdwdata[$fi][$i][1],\@atomtypes)) {
-	push(@paircoeff,[@{$field_vdwdata[$fi][$i]}]);
-	@{$paircoeff[$#paircoeff]}[0..1]=sort {$a <=> $b} ($k+1,$l+1);
+        $m=$#paircoeff+1;
+	@{$paircoeff[$m]} = sort {$a <=> $b} ($k+1,$l+1);
+	$paircoeff[$m][2] = $j;
+	if($field_vdwdata[$fi][$i][2] =~ /^lj/i) {
+          $paircoeff[$m][3] = $field_vdwdata[$fi][$i][3]*$fenergy;
+          $paircoeff[$m][4] = $field_vdwdata[$fi][$i][4]*$flength;
+        } elsif($field_vdwdata[$fi][$i][2] =~ /^12-6/) {
+          $paircoeff[$m][3] = (($field_vdwdata[$fi][$i][3]-$field_vdwdata[$fi][$i][4])/
+            (4.0*(($field_vdwdata[$fi][$i][3]/$field_vdwdata[$fi][$i][4])**2
+            -($field_vdwdata[$fi][$i][3]/$field_vdwdata[$fi][$i][4]))))*$fenergy; #epsilon
+          $paircoeff[$m][4] = (($field_vdwdata[$fi][$i][3]/($field_vdwdata[$fi][$i][4])**(1.0/6.0)))*$flength; #sigma
+        } elsif($field_vdwdata[$fi][$i][2] =~ /^buck/) {
+          $paircoeff[$m][3] = $paircoeff[$i][3]*$fenergy;
+          $paircoeff[$m][4] = $paircoeff[$i][4]*$flength;
+          $paircoeff[$m][5] = $paircoeff[$i][5]*$fenergy;
+        } elsif($field_vdwdata[$fi][$i][2] =~ /^mors/) {
+          $paircoeff[$m][3] = $field_vdwdata[$fi][$i][3]*$fenergy;
+          $paircoeff[$m][4] = $field_vdwdata[$fi][$i][5];
+          $paircoeff[$m][5] = $field_vdwdata[$fi][$i][4]*$flength;
+        }
       }
     }
   }
-  
-  $numbondstyles     = scalar keys %bondstyles;
-  $numanglestyles    = scalar keys %anglestyles;
-  $numdihedralstyles = scalar keys %dihedralstyles;
-  $numpairstyles     = scalar keys %pairstyles;
-  
+  @paircoeff=sort { $a->[0] <=> $b->[0] || $a->[1] <=> $b->[1] } @paircoeff;
+    
   ############ generate data file #############################################
   
   if(not open($fh_data, ">", "$filename.data")) {
@@ -339,18 +427,18 @@ sub write_lammps_data {
   
   print $fh_data "\nMasses\n\n";
   for($i=0;$i<@atomtypes;$i++) {
-    printf $fh_data "%8u  %10.4f\n", $i+1,$atomtypes[$i][1]*$fmass;
+    printf $fh_data "%8u  %10.4f  # %-8s\n", $i+1,$atomtypes[$i][1]*$fmass,$atomtypes[$i][0];
   }
   if(@bondcoeff) {
     print $fh_data "\nBond Coeffs\n\n";
     for($i=0;$i<@bondcoeff;$i++) {
       if($bondcoeff[$i][0] =~ /^harm/) {
 	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s", "harmonic" if($numbondstyles>1);
+	printf $fh_data " %-15s", "harmonic" if(@bondstyles>1);
 	printf $fh_data " %15.6f %15.6f\n" ,0.5*$fenergy*$bondcoeff[$i][3],$flength*$bondcoeff[$i][4];
       } elsif($bondcoeff[$i][0] =~ /^quar/) {
 	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s", "class2" if($numbondstyles>1);
+	printf $fh_data " %-15s", "class2" if(@bondstyles>1);
 	printf $fh_data " %15.6f %15.6f %15.6f %15.6f\n",$flength*$bondcoeff[$i][4],
 	0.5*$fenergy*$bondcoeff[$i][3],$bondcoeff[$i][5]*$fenergy/3.0,0.25*$fenergy*$bondcoeff[$i][6];
       } else {
@@ -364,15 +452,15 @@ sub write_lammps_data {
     for($i=0;$i<@anglecoeff;$i++) {
       if($anglecoeff[$i][0] =~ /^harm/) {
 	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s", "harmonic" if($numanglestyles>1);
+	printf $fh_data " %-15s", "harmonic" if(@anglestyles>1);
 	printf $fh_data " %15.6f %15.6f\n" ,0.5*$fenergy*$anglecoeff[$i][4],$anglecoeff[$i][5];
       } elsif($anglecoeff[$i][0] =~ /^hcos/) {
 	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s", "cosine/squared" if($numanglestyles>1);
+	printf $fh_data " %-15s", "cosine/squared" if(@anglestyles>1);
 	printf $fh_data " %15.6f %15.6f\n" ,0.5*$fenergy*$anglecoeff[$i][4],$anglecoeff[$i][5];
 #       } elsif($anglecoeff[$i][0] =~ /^quar/) {
 # 	printf $fh_data "%8u", $i+1;
-# 	printf $fh_data " %-15s","quartic" if($numanglestyles>1);
+# 	printf $fh_data " %-15s","quartic" if(@anglestyles>1);
 # 	printf $fh_data " %15.6f %15.6f %15.6f %15.6f\n",$anglecoeff[$i][5],
 # 	0.5*$fenergy*$anglecoeff[$i][4],0.5*$fenergy*$anglecoeff[$i][6],0.5*$fenergy*$anglecoeff[$i][7];
       } else {
@@ -384,14 +472,19 @@ sub write_lammps_data {
   if(@dihedralcoeff) {
     print $fh_data "\nDihedral Coeffs\n\n";
     for($i=0;$i<@dihedralcoeff;$i++) {
+      printf $fh_data "%8u", $i+1;
       if($dihedralcoeff[$i][0] =~ /^harm/) {
-	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s","quadratic" if($numdihedralstyles>1);
-	printf $fh_data " %15.6f %15.6f\n",0.5*$fenergy*$dihedralcoeff[$i][5],$dihedralcoeff[$i][6];
-      } elsif($dihedralcoeff[$i][0] =~ /^cos/) {
-	printf $fh_data "%8u", $i+1;
-	printf $fh_data " %-15s","charmm" if($numdihedralstyles>1);
-	printf $fh_data " %15.6f %4u %4u %7.5f\n",
+	printf $fh_data " %-15s","quadratic" if(@dihedralstyles>1);
+	printf $fh_data " %15.6g %15.6g\n",0.5*$fenergy*$dihedralcoeff[$i][5],$dihedralcoeff[$i][6];
+      } elsif($dihedralcoeff[$i][0] =~ /^cos3$/) {
+	printf $fh_data " %-15s","opls" if(@dihedralstyles>1);
+	printf $fh_data " %15.6g %15.6g %15.6g %15.6g\n",
+	$dihedralcoeff[$i][5]*$fenergy,
+	$dihedralcoeff[$i][6]*$fenergy,
+	$dihedralcoeff[$i][7]*$fenergy,0;
+      } elsif($dihedralcoeff[$i][0] =~ /^cos$/) {
+	printf $fh_data " %-15s","charmm" if(@dihedralstyles>1);
+	printf $fh_data " %15.6g %4u %5.0f %7.5f\n",
 	$dihedralcoeff[$i][5]*$fenergy,$dihedralcoeff[$i][7],$dihedralcoeff[$i][6],0;
       } else {
 	print "**** error: dihedral potential \"$dihedralcoeff[$i][0]\" is not implemented (yet)!\n";
@@ -506,8 +599,8 @@ sub write_lammps_data {
   
   if($numbonds>0) {
     print $fh_in "bond_style"; 
-    print $fh_in " hybrid" if($numbondstyles>1); 
-    foreach $i (keys %bondstyles) {
+    print $fh_in " hybrid" if(@bondstyles>1); 
+    foreach $i (@bondstyles) {
       if($i=~/^harm/) {
 	print $fh_in " harmonic";
       } elsif($i=~/^quar/) {
@@ -516,11 +609,11 @@ sub write_lammps_data {
     }
     print $fh_in "\n";
   }
-  print $fh_in "special_bonds amber\n";
+  print $fh_in "special_bonds $specialbonds\n";
   if($numangles>0) {
     print $fh_in "angle_style"; 
-    print $fh_in " hybrid" if($numanglestyles>1); 
-    foreach $i (keys %anglestyles) {
+    print $fh_in " hybrid" if(@anglestyles>1); 
+    foreach $i (@anglestyles) {
       if($i=~/^harm/) {
 	print $fh_in " harmonic";
       } elsif($i=~/^hcos/) {
@@ -533,81 +626,52 @@ sub write_lammps_data {
   }
   if($numdihedrals>0) {
     print $fh_in "dihedral_style"; 
-    print $fh_in " hybrid" if($numdihedralstyles>1); 
-    foreach $i (keys %dihedralstyles) {
+    print $fh_in " hybrid" if(@dihedralstyles>1); 
+    foreach $i (@dihedralstyles) {
       if($i=~/^harm/) {
 	print $fh_in " quadratic";
-      } elsif($i=~/^cos/) {
+      } elsif($i=~/^cos$/) {
 	print $fh_in " charmm";
+      } elsif($i=~/^cos3$/) {
+	print $fh_in " opls";
       }
     }
     print $fh_in "\n";
   }
   print $fh_in "read_data $filename.data\n";
-  if($numpairstyles>0) {
-    #coulomb potential
-    @paircoeff=sort { $a->[0] <=> $b->[0] || $a->[1] cmp $b->[1] } @paircoeff;
+  print $fh_in "\npair_modify shift yes mix arithmetic\n";
+  if(@pairstyles>1) {
     print $fh_in "pair_style hybrid/overlay";
-    if($coulmethod=~/^coul/) {
-      print $fh_in " coul/cut $cutglob"
-    } elsif($coulmethod=~/^shift/) {
-      if($coulmethod=~/^damp/) { # damped shifted force
-        print $fh_in " coul/dsf $control_coulprm[0][0] $cutglob";
-      } elsif($coulmethod=~/prec/) { # damped shifted force w/ automatic parameter optim
-	$i = min(0.5,abs($control_coulprm[0][0])); #eps in define_system_module.f
-	$j = sqrt(abs(log($i*$cutglob))); #tol
-	$k = sqrt(abs(log($i*$cutglob*$j)))/$cutglob;
-        printf $fh_in " coul/dsf %.5g %s",$k,$cutglob;
-      } else { # shifted force
-        print $fh_in " coul/dsf 0 $cutglob";
-      }
-    } elsif($coulmethod=~/^(ewald|spme|hke)/) {
-      print "**** error: ewald summation is not implemented (yet)!\n"; return 1;
-    } else {
-      print "**** warning: unknown coulomb method \"$coulmethod.\"\n";
-      print "              using shifted coulomb summation instead\n";
-      print $fh_in " coul/dsf 0 $cutglob";
-      $coulmethod = "shift";
-    }
+    #coulomb potential
+    print $fh_in " $coulstyle $couladd" if(defined($coulstyle));
     # vdw potentials
-    foreach $i (keys %pairstyles) {
-      if($i=~/^lj/ or $i=~/^12-6/) {
-        print $fh_in " lj/cut $rvdw";
-      } elsif($i=~/^buck/) {
-        print $fh_in " buck $rvdw";
-      } elsif($i=~/^mors/) {
-        print $fh_in " morse $rvdw";
-      } else {
-	print "**** error: unknown VDW type $i\n"; return 1;
-      }
+    foreach $i (@pairstyles) {
+      print $fh_in " $i $rvdw";
     }
-    print $fh_in "\npair_modify shift yes mix arithmetic\n";
-    print $fh_in "pair_coeff     *    *   ";
-    if($coulmethod=~/^coul/ or not defined($coulmethod)) {
-      print $fh_in "coul/cut\n";
-    } elsif($coulmethod=~/^shift/) {
-      print $fh_in "coul/dsf\n";
+    print $fh_in "\n";
+    print $fh_in "pair_coeff     *    *   $coulstyle\n" if(defined($coulstyle));
+  } elsif(@pairstyles>0) {
+    print $fh_in "pair_style $pairstyles[0]";
+    if(defined($coulstyle)) {
+      print $fh_in "/$coulstyle $couladd";
+      print $fh_in " $rvdw" if($rvdw != $cutglob);
+    } else {
+      print $fh_in " $rvdw"
     }
-    for($i=0;$i<@paircoeff;$i++) {
-      print $fh_in "pair_coeff ";
-      if($paircoeff[$i][2] =~ /^lj/) {
-        printf $fh_in " %4u %4u   %-15s",$paircoeff[$i][0],$paircoeff[$i][1],"lj/cut";
-	printf $fh_in " %15.6f %15.6f\n",$paircoeff[$i][3]*$fenergy,$paircoeff[$i][4]*$flength;
-      } elsif($paircoeff[$i][2] =~ /^12-6/) {
-        printf $fh_in " %4u %4u   %-15s",$paircoeff[$i][0],$paircoeff[$i][1],"lj/cut",$paircoeff[$i][0],$paircoeff[$i][1];
-	printf $fh_in " %15.6f %15.6f\n",
-	(($paircoeff[$i][3]-$paircoeff[$i][4])/(4.0*(($paircoeff[$i][3]/$paircoeff[$i][4])**2-($paircoeff[$i][3]/$paircoeff[$i][4]))))*$fenergy, #epsilon
-	(($paircoeff[$i][3]/($paircoeff[$i][4])**(1.0/6.0)))*$flength; #sigma
-      } elsif($paircoeff[$i][2] =~ /^buck/) {
-        printf $fh_in " %4u %4u   %-15s",$paircoeff[$i][0],$paircoeff[$i][1],"buck";
-	printf $fh_in " %15.6f %15.6f %15.6f\n",$paircoeff[$i][3]*$fenergy,$paircoeff[$i][4]*$flength,$paircoeff[$i][5]*$fenergy;
-      } elsif($paircoeff[$i][2] =~ /^mors/) {
-        printf $fh_in " %4u %4u   %-15s",$paircoeff[$i][0],$paircoeff[$i][1],"morse";
-	printf $fh_in " %15.6f %15.6f %15.6f\n",$paircoeff[$i][3]*$fenergy,$paircoeff[$i][5],$paircoeff[$i][4]*$flength;
-      }
-    }
+    print $fh_in "\n";
   }
-  
+  for($i=0;$i<@paircoeff;$i++) {
+    print $fh_in "pair_coeff ";
+    printf $fh_in " %4u %4u",$paircoeff[$i][0],$paircoeff[$i][1];
+    printf $fh_in " %-10s",$paircoeff[$i][2] if(@pairstyles>1);
+    for($j=3;$j<@{$paircoeff[$i]};$j++) {
+      printf $fh_in "%15.6g",$paircoeff[$i][$j];
+    }
+    print $fh_in "\n";
+  }
+  for($i=0;$i<@molgroups;$i++) {
+    print $fh_in "# $molgroups[$i]\n";
+  }
   if(@frozenatoms) {
     $group_integrate="integrate";
     print $fh_in "group frozen id ",join(" ",@frozenatoms),"\n";
@@ -677,6 +741,9 @@ sub write_lammps_data {
     } else {
       print "**** error: unknown barostat/thermostat!\n"; return 1;
     }
+  }
+  if(defined($control_nofic[$oi])) {
+    print $fh_in "fix nofic $group_integrate momentum $control_nofic[$oi] linear 1 1 1 rescale\n";
   }
   if(defined($control_mult[$oi])) {
     print "**** warning: directive \"mult\" is not implemented (yet)! neglecting it\n";
