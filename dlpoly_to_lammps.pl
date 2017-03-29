@@ -14,13 +14,15 @@ if($#ARGV<3) {
   print "4. name of output lammps files (*.data, *.in)\n";
   print "optional flags:\n";
   print "-d <str> dump as dcd (default), lammpstrj or xyz\n";
-  print "-ii      print only ii pairwise parameters and not ij\n";
+  print "-0       ignore pair potentials that are zero\n";
+  print "-ii      print only ii pairwise parameters and use mixing\n";
   exit 1;
 }
 
 my($i);
 my $dump   = "dcd";
 my $onlyii = 0;
+my $ignorezero = 0;
 for($i=4;$i<@ARGV;$i++) {
   switch($ARGV[$i]) {
     case (/^-d$/i) {
@@ -32,6 +34,8 @@ for($i=4;$i<@ARGV;$i++) {
       }
     } case (/^-ii$/i) {
       $onlyii=1;
+    } case (/^-0$/i) {
+      $ignorezero=1;
     } else {
       print "**** error: expected optional flag but got \"$ARGV[$i]\"!\n";
       exit 1;
@@ -44,9 +48,9 @@ exit 1 if(read_config_file($ARGV[0],0,0)!=0);
 $ARGV[2]=~s/(^\s+|\s+$)//g;
 if(length($ARGV[2]) > 0) {
   exit 1 if(read_control_file($ARGV[2],0)!=0);
-  write_lammps_data($ARGV[3],0,0,0,"metal","lammps test",$dump,$onlyii);
+  write_lammps_data($ARGV[3],0,0,0,"metal","lammps test",$dump,$onlyii,$ignorezero);
 } else {
-  write_lammps_data($ARGV[3],0,0,-1,"metal","lammps test",$dump,$onlyii);
+  write_lammps_data($ARGV[3],0,0,-1,"metal","lammps test",$dump,$onlyii,$ignorezero);
 }
 
 sub write_lammps_data {
@@ -61,6 +65,8 @@ sub write_lammps_data {
   my $dumpstyle = $_[6];
   my $onlyii    = 0;
   $onlyii=$_[7] if($#_>6);
+  my $ignorezero = 0;
+  $ignorezero=$_[8] if($#_>6);
   
   my $numatoms=0;
   my $numbonds=0;
@@ -336,7 +342,7 @@ sub write_lammps_data {
   for($i=0;$i<@{$field_vdwdata[$fi]};$i++) {
     next if($onlyii and $field_vdwdata[$fi][$i][0] ne $field_vdwdata[$fi][$i][1]);
     next if(not contains(@usedtypes,$field_vdwdata[$fi][$i][0]) or not contains(@usedtypes,$field_vdwdata[$fi][$i][1]));
-    if($field_vdwdata[$fi][$i][2]=~/lj/i and $field_vdwdata[$fi][$i][3]==0) {
+    if($ignorezero and $field_vdwdata[$fi][$i][2]=~/lj/i and $field_vdwdata[$fi][$i][3]==0) {
       print "ignoring lj-potential $field_vdwdata[$fi][$i][0]-$field_vdwdata[$fi][$i][1] with epsilon=0\n";
       next;
     }
@@ -639,7 +645,11 @@ sub write_lammps_data {
     print $fh_in "\n";
   }
   print $fh_in "read_data $filename.data\n";
-  print $fh_in "\npair_modify shift yes mix arithmetic\n";
+  if($onlyii) {
+    print $fh_in "pair_modify shift yes mix arithmetic\n";
+  } else {
+    print $fh_in "pair_modify shift yes\n";
+  }
   if(@pairstyles>1) {
     print $fh_in "pair_style hybrid/overlay";
     #coulomb potential
