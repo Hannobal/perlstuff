@@ -20,7 +20,7 @@ our %EXPORT_TAGS = ( 'all' => [ qw() ] );
 our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw(calc_zsurf find_hydroxide_candidates %refcindex %refp5index
     find_pa_phosphorous find_longest_chain find_longest_alkyl_chain
-    find_c60_atoms);
+    find_c60_atoms find_acidic_protons find_acidic_oxygens);
 
 our $VERSION = '0.01';
 
@@ -313,6 +313,57 @@ sub find_c60_atoms {
     }
   }
   return @c60;
+}
+
+
+sub find_acidic_protons {
+  my $fi=$_[0];
+  my $t=$_[1];
+  my @lst=();
+  for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
+    if($mol_atomdata[$fi][$t][$a][$fi]=~/^P5$/i) {
+      for my $b (@{$mol_bondatoms[$fi][$t][$a]}) {
+	for my $c (@{$mol_bondatoms[$fi][$t][$b]}) {
+	  if($mol_atomdata[$fi][$t][$c][0]=~/^(HO|HG)$/i) {
+	    push(@lst,$c);
+	  }
+	}
+      }
+    }
+  }
+  return @lst;
+}
+
+sub find_acidic_oxygens {
+  # the third argument is as follows:
+  # 0/undef  return only doubly bound oxygen
+  # 1        return doubly bound oxygen and hydroxyl oxygen
+  # else     return only doubly bound oxygen
+  my $fi=$_[0];
+  my $t=$_[1];
+  my $addoh=0;
+  if($#_>1) {
+    if($_[2]==0) {
+      $addoh=0;
+    } elsif($_[2]==1) {
+      $addoh=1;
+    } else {
+      $addoh=2;
+    }
+  }
+  my @lst=();
+  for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
+    if($mol_atomdata[$fi][$t][$a][$fi]=~/^P5$/i) {
+      for my $b (@{$mol_bondatoms[$fi][$t][$a]}) {
+        if($addoh<2 and $mol_atomdata[$fi][$t][$b][0]=~/^(O)$/i) {
+          push(@lst,$b);
+	} elsif($addoh>0 and $mol_atomdata[$fi][$t][$b][0]=~/^(OH)$/i) {
+          push(@lst,$b);
+	}
+      }
+    }
+  }
+  return @lst;
 }
 
 1;

@@ -153,11 +153,16 @@ for($i=0;$i<@indices;$i++) {
     print $fhhist "# conditions:\n";
     print $fhhist "# ",join("\n# ",@condflags),"\n";
   }
-  for($j=$histminindex[$i];$j<=$histmaxindex[$i];$j++) {
+  for($j=$histminindex[$i]-1;$j<=$histmaxindex[$i]+1;$j++) {
     if($lminval) {
-      printf $fhhist "%20.8g %10.7f %10u\n", $histres[$i]*($j-0.5)+$minval[$i], $histogram[$i][$j], $histnum[$i][$j];
+      $xpos=$histres[$i]*($j-0.5)+$minval[$i];
     } else {
-      printf $fhhist "%20.8g %10.7f %10u\n", $histres[$i]*$j+$minval[$i], $histogram[$i][$j], $histnum[$i][$j];
+      $xpos=$histres[$i]*$j+$minval[$i]
+    }
+    if($j<0) {
+      printf $fhhist "%20.8g %10.7f %10u\n", $xpos, 0, 0;
+    } else {
+      printf $fhhist "%20.8g %10.7f %10u\n", $xpos, $histogram[$i][$j], $histnum[$i][$j];
     }
   }
 }

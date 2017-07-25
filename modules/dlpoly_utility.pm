@@ -46,7 +46,7 @@ our @EXPORT = qw(@cell @size @config_key @config_title @periodic_key @cdata @fra
     calc_dvec_orthocell calc_dvec_orthocell_vec calc_center_of_mass_orthocell calc_dipole_moment
     cut_truncated_octahedron calc_cell_abc calc_cell_vecs print_statis_data_header print_statis_data
     calc_angle calc_angle_orthocell rotate_cell_vmd read_rdfdat_file print_rdfdat_data read_zdndat_file
-    print_zdndat_data check_orthogonal
+    print_zdndat_data check_orthogonal clear_field_data
     
     @mol2_name @mol2_numatoms @mol2_numbonds @mol2_numsubst @mol2_numfeat @mol2_numsets @mol2_moltype 
     @mol2_chargemethod @mol2_atomdata @mol2_bonddata @mol2_substdata @mol2_atomtypes @mol2_statusbits 
@@ -180,24 +180,11 @@ our %element_names=(
 #                      0      1       2     3      4      5       6      7       8     9      10     11     12     13    14     15
 our @sdata_names = ('FRAME','TIME','ETOT','TTOT','ECFG','EVDW','ECOUL','EBND','EANG','EDIH','ETET','HTOT','TTOT','TROT','VOL','PRESS');
 
-sub read_field_file {
-  my $filename = $_[0];
-  my $fi       = $_[1]; # index for array of field-data
-  my($filehandle,$keyword,$t,$i,$j,$numentries,$finished,$type, $addtype);
-  if($fi<0) {
-    print "**** error: index \$fi must not be smaller than zero in sub read_field_file\n";
+sub clear_field_data {
+  my $fi       = $_[0]; # index for array of field-data
+  if((not defined($fi)) or $fi<0) {
+    print "**** error: index \$fi must not be smaller than zero in sub clear_field_data\n";
     return -1;
-  }
-  $field_filename[$fi]=$filename;
-  if(not open($filehandle, "<", $filename)) {
-    print "**** error: Can't open FIELD file \"$filename\": $!\n";
-    return 1;
-  }
-  my @linedata;
-  if(not defined($fi) or $fi<0) {
-    print "**** error in subroutine read_field_file:\n     index value must be >= 0!\n";
-    close($filehandle);
-    return 1;
   }
   
   $field_numheader[$fi]    = 0;
@@ -240,6 +227,25 @@ sub read_field_file {
   undef @{$field_repsdata[$fi]};
   undef @{$field_externdata[$fi]};
   undef @{$field_atomtypes[$fi]};
+  
+}
+
+sub read_field_file {
+  my $filename = $_[0];
+  my $fi       = $_[1]; # index for array of field-data
+  my($filehandle,$keyword,$t,$i,$j,$numentries,$finished,$type, $addtype);
+  if(not defined($fi) or $fi<0) {
+    print "**** error: index \$fi must not be smaller than zero in sub read_field_file\n";
+    return -1;
+  }
+  $field_filename[$fi]=$filename;
+  if(not open($filehandle, "<", $filename)) {
+    print "**** error: Can't open FIELD file \"$filename\": $!\n";
+    return 1;
+  }
+  
+  clear_field_data($fi);
+  my @linedata;
   
   ############## read header from FIELD file ##########################
   $field_title[$fi] = <$filehandle>;
@@ -2699,6 +2705,9 @@ sub enlarge_system {
   $config_key[$cio]   = $config_key[$cii];
   $frame_numatoms[$cio] = $frame_numatoms[$cii]*$rep[0]*$rep[1]*$rep[2];
   $field_numatoms[$fio] = $field_numatoms[$fii]*$rep[0]*$rep[1]*$rep[2];
+  $size[$cio][0] = ($cell[$cio][0][0] + $cell[$cio][1][0] + $cell[$cio][2][0])/2;
+  $size[$cio][1] = ($cell[$cio][0][1] + $cell[$cio][1][1] + $cell[$cio][2][1])/2;
+  $size[$cio][2] = ($cell[$cio][0][2] + $cell[$cio][1][2] + $cell[$cio][2][2])/2;
   &calc_minmaxpos($cio);
   return 0;
 }

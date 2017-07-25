@@ -39,6 +39,7 @@ if($#ARGV<2) {
   print "-dn          include only specified molecule names for density calculation\n";
   print "-dh          create density histogram for each step\n";
   print "-dhav        create time-averaged density histogram\n";
+  print "-chav        create time-averaged charge density histogram\n";
   print "-dr <real>   resolution of z-profile histogram (default: $histresdens)\n";
   print "-v <n*3*int> analyze orientation of vector between atoms in molecule\n";
   print "             format: n*(<mol_name> <atomid 1> <atomid 2>) atom indices starting from 1\n";
@@ -118,6 +119,8 @@ for($i=2;$i<@ARGV;$i++) {
       $ldenshist = 1;
     } case ("-dhav") {
       $ldenshistav = 1;
+    } case ("-chav") {
+      $lchargehistav = 1;
     } case ("-dr") {
       $i++;
       $histresdens = $ARGV[$i];
@@ -196,7 +199,7 @@ if($ldensbulk) {
     print DENS_AV "\n";
     print DENS_AV "of molecules",join(" ",@denstypes),"\n" if(@denstypes);
   }
-  printf DENS_AV "%14s%14s","time_[ps]","dens_[g/cm^3]";
+  printf DENS_AV "%14s %14s","time_[ps]","dens_[g/cm^3]";
 }
 if($ldenshist) {
   open(DENS_HISTZ, ">", "$outdir/DENS_HISTZ") or die "Can't create file DENS_HISTZ: $!";
@@ -214,7 +217,7 @@ for($i=0;$i<@orientvecs;$i++) {
   } else {
     print $file "# for all molecules\n";
   }
-  printf $file "\n#%13s%14s%14s%14s%10s","time_[ps]","vec_x","vec_y","vec_z","numvecs for average";
+  printf $file "\n#%13s %14s %14s %14s %10s","time_[ps]","vec_x","vec_y","vec_z","numvecs for average";
   if($lovecz) {
     print $file "# within z-range $oveczmin A and $oveczmax A\n";
   }
@@ -290,8 +293,10 @@ foreach $dir (@directories) {
 	} # end for $m
       } # end for $t
       $densbulk = d0*$bulkmass/$bulkvol;
-      printf DENS_AV "\n%14.4f%14.8f",$time,$densbulk;
+      printf DENS_AV "\n%14.4f %14.8f",$time,$densbulk;
     } # end if($ldensbulk)
+    
+    ############### analyze density profile ####################################
     
     if($ldenshist or $ldenshistav) {
       %denshist = ();
@@ -308,12 +313,39 @@ foreach $dir (@directories) {
       } # end for $t
       $denshistvol = $histresdens*$size[0][0]*$size[0][1]*4;
       print DENS_HISTZ "\n\n\n# histogram for $time ps";
-      printf DENS_HISTZ "\n%14s%14s", "zpos_[A]","dens_[g/cm^3]";
+      printf DENS_HISTZ "\n%14s %14s", "zpos_[A]","dens_[g/cm^3]";
       foreach $i (sort {$a<=> $b} keys %denshist) {
 	$denshist{$i} *= d0/$denshistvol;
-	printf DENS_HISTZ "\n%14.6f%14.8f",($i*$histresdens),$denshist{$i};
+	printf DENS_HISTZ "\n%14.6f %14.8f",($i*$histresdens),$denshist{$i};
 	if($ldenshistav) {
 	  $denshistav{$i} += $denshist{$i};
+	}
+      }
+    }
+    
+    ############### analyze charge density profile #############################
+    
+    if($lchargehist or $lchargehistav) {
+      %chargedenshist = ();
+      for($t=0;$t<$field_nummols[0];$t++) {
+	if(@denstypes) {
+	  next if(not contains(@denstypes,$t));
+	}
+	for($m=0;$m<$mol_numents[0][$t];$m++) {
+	  for($a=0;$a<$mol_numatoms[0][$t];$a++) {
+	    $i = floor($cdata[0][$t][$m][$a][2]/$histresdens);
+	    $chargedenshist{$i} += $mol_atomdata[0][$t][$a][2];
+	  } # end for $a
+	} # end for $m
+      } # end for $t
+      $denshistvol = $histresdens*$size[0][0]*$size[0][1]*4;
+#       print CDENS_HISTZ "\n\n\n# histogram for $time ps";
+#       printf CDENS_HISTZ "\n%14s %14s", "zpos_[A]","chargedens_[e/A^3]";
+      foreach $i (sort {$a<=> $b} keys %chargedenshist) {
+	$chargedenshist{$i} *= 1/$denshistvol;
+# 	printf CDENS_HISTZ "\n%14.6f %14.8f",($i*$histresdens),$chargedenshist{$i};
+	if($lchargehistav) {
+	  $chargedenshistav{$i} += $chargedenshist{$i};
 	}
       }
     }
@@ -347,7 +379,7 @@ foreach $dir (@directories) {
       $resvec[0] /= $numvecs;
       $resvec[1] /= $numvecs;
       $resvec[2] /= $numvecs;
-      printf $file "\n%14.4f%14.8f%14.8f%14.8f%10u",$time,@resvec,$numvecs;
+      printf $file "\n%14.4f %14.8f %14.8f %14.8f %10u",$time,@resvec,$numvecs;
     }
     
     ############### analyze fullerene positions ################################
@@ -377,13 +409,23 @@ foreach $dir (@directories) {
 } # end for directories
 # write average density histogram
 if($ldenshistav) {
-print "asdf\n";
   open(DENS_HISTZ_AV, ">", "$outdir/DENS_HISTZ_AV") or die "Can't create file DENS_HISTZ_AV: $!";
-  print DENS_HISTZ_AV "# time averaged density histogram";
+  print DENS_HISTZ_AV "# time averaged density histogram\n";
   print DENS_HISTZ_AV "# $numframes analyzed\n";
   print DENS_HISTZ_AV "# density from molecules ",join(" ",@denstypes),"\n" if(@denstypes);
   foreach $i (sort {$a <=> $b} keys %denshistav) {
-    printf DENS_HISTZ_AV "\n%14.6f%14.8f",($i*$histresdens),$denshistav{$i}/$numframes;
+    printf DENS_HISTZ_AV "\n%14.6f %14.8f",($i*$histresdens),$denshistav{$i}/$numframes;
+  }
+  close(DENS_HISTZ_AV)
+}
+
+if($lchargehistav) {
+  open(DENS_HISTZ_AV, ">", "$outdir/CHARGE_DENS_HISTZ_AV") or die "Can't create file CHARGE_DENS_HISTZ_AV: $!";
+  print DENS_HISTZ_AV "# time averaged charge density histogram\n";
+  print DENS_HISTZ_AV "# $numframes analyzed\n";
+  print DENS_HISTZ_AV "# charge density from molecules ",join(" ",@denstypes),"\n" if(@denstypes);
+  foreach $i (sort {$a <=> $b} keys %chargedenshistav) {
+    printf DENS_HISTZ_AV "\n%14.6f %14.8g",($i*$histresdens),$chargedenshistav{$i}/$numframes;
   }
   close(DENS_HISTZ_AV)
 }

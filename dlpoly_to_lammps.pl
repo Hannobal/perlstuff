@@ -333,9 +333,9 @@ sub write_lammps_data {
         $specialbonds="NEEDS REVISION";
       }
     }
-    $i=$indexoffset+$mol_numatoms[$fi][$t]*$mol_numents[$fi][$t];
+    $i=$indexoffset+$mol_numatoms[$fi][$t]*$mol_numents[$fi][$t]-1;
     push(@molgroups,"group $mol_name[$fi][$t] id $indexoffset:$i");
-    $indexoffset=$i
+    $indexoffset=$i+1;
   }
   
   # check vdw pairs
@@ -645,11 +645,6 @@ sub write_lammps_data {
     print $fh_in "\n";
   }
   print $fh_in "read_data $filename.data\n";
-  if($onlyii) {
-    print $fh_in "pair_modify shift yes mix arithmetic\n";
-  } else {
-    print $fh_in "pair_modify shift yes\n";
-  }
   if(@pairstyles>1) {
     print $fh_in "pair_style hybrid/overlay";
     #coulomb potential
@@ -669,6 +664,11 @@ sub write_lammps_data {
       print $fh_in " $rvdw"
     }
     print $fh_in "\n";
+  }
+  if($onlyii) {
+    print $fh_in "pair_modify shift yes mix arithmetic\n";
+  } else {
+    print $fh_in "pair_modify shift yes\n";
   }
   for($i=0;$i<@paircoeff;$i++) {
     print $fh_in "pair_coeff ";

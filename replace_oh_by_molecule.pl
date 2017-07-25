@@ -6,7 +6,7 @@ use dlpoly_utility;
 use hanno_utility;
 #use Storable qw(dclone);
 
-$tolerance=0.2;
+$tolerance=0.5;
 @islandcenter=(0,0);
 @holecenter=(0,0);
 
@@ -166,7 +166,7 @@ if($factor[0][0]==$factor[1][0] and $factor[0][1]==$factor[1][1]) {
 }
 
 if($system eq "alumina0001") {
-  $doo=2.755333333;
+  $doo=2.75552;
   $ohperiodicvec[0][0]=$doo;
   $ohperiodicvec[0][1]=0;
   $ohperiodicvec[1][0]=$doo*cos(pi/3);
@@ -219,7 +219,6 @@ for($a=0;$a<$mol2_numatoms[0];$a++) {
 $c = sprintf("%.0f",$mol2_charge[0]);
 if(not defined($bindingmode)) {
   if($c==0) {
-    print "asdf\n";
     $bindingmode=0;
   }elsif($c==-1) {
     $bindingmode=1;
@@ -306,7 +305,7 @@ for($m=0;$m<$mol_numents[0][$t];$m++) {
   }
 }
 
-print "found $#candidate candiates\n";
+print "found ",($#candidate+1)," candiates\n";
 
 if(not @center) {
   @center=($xmin,$ymin);

@@ -17,13 +17,301 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 our @EXPORT = qw(@lmp_numstyles @lmp_styles @lmp_coeffs $lmp_units @lmp_fixes
 @lmp_variables @lmp_units @lmp_atomtypes @ldata @ldata_names
 
-read_lammpstrj_timestep read_dcd_timestep find_last_dcd_timestep close_dcd_file
-read_logfile);
+read_lammps_data read_lammpstrj_timestep read_dcd_timestep find_last_dcd_timestep
+close_dcd_file read_logfile open_dcd_write write_dcd_timestep skip_dcd_timestep
+goto_last_dcd_timestep goto_dcd_timestep);
+
+sub read_lammps_data {
+  my $filename = $_[0];
+  my $fi       = $_[1];
+  my $ci       = $_[2];
+  my($filehandle,$keyword,@bonds,@linedata,@atoms,@vel,@angles,@dihedrals,@impropers,
+  @masses,@bdtypes,@angtypes,@dihtypes,@imptypes,
+  $natoms,$nbonds,$nangles,$ndihedrals,$nimpropers,$nattypes,$nbdtypes,$nangtypes,
+  $ndihtypes,$nimptypes,$nmax,$arrptr);
+  if((not defined($fi)) or $fi<0) {
+    print "**** error: index \$fi must not be smaller than zero in sub read_lammps_data\n";
+    return -1;
+  }
+  
+  if((not defined($ci)) or $ci<0) {
+    print "**** error: index \$ci must not be smaller than zero in sub read_lammps_data\n";
+    return -1;
+  }
+  
+  if(not open($filehandle, "<", $filename)) {
+    print "**** error: Can't open LAMMPS data file \"$filename\": $!\n";
+    return 1;
+  }
+  
+  clear_field_data($fi);
+  undef @{$cdata[$ci]};
+  undef @{$cell[$ci]};
+  undef @{$size[$ci]};
+  $field_filename[$fi]=$filename;
+  
+  ############## read header from data file ##########################
+  
+  $field_title[$fi] = <$filehandle>;
+  $field_title[$fi] =~ s/(^\s+|\s+$)//g;
+  $config_title[$ci] = $field_title[$fi];
+  @{$cell[$ci]} = ([0,0,0],[0,0,0],[0,0,0]);
+  while(<$filehandle>) {
+    $_ =~ s/(^\s+|#.*$|\s+$)//g;
+    next if(length($_)==0);
+    @linedata = split(/\s+/,$_);
+    last if(not check_real($linedata[0]));
+    if(/atoms/) {
+      $natoms=$linedata[0];
+    } elsif(/bonds/) {
+      $nbonds=$linedata[0];
+    } elsif(/angles/) {
+      $nangles=$linedata[0];
+    } elsif(/dihedrals/) {
+      $ndihedrals=$linedata[0];
+    } elsif(/impropers/) {
+      $nimpropers=$linedata[0];
+    } elsif(/atom\s+types/) {
+      $nattypes=$linedata[0];
+    } elsif(/bond\s+types/) {
+      $nbdtypes=$linedata[0];
+    } elsif(/angle\s+types/) {
+      $nangtypes=$linedata[0];
+    } elsif(/dihedral\s+types/) {
+      $ndihtypes=$linedata[0];
+    } elsif(/xlo\s+xhi/) {
+      $cell[$ci][0][0]=$linedata[1]-$linedata[0];
+    } elsif(/ylo\s+yhi/) {
+      $cell[$ci][1][1]=$linedata[1]-$linedata[0];
+    } elsif(/zlo\s+zhi/) {
+      $cell[$ci][2][2]=$linedata[1]-$linedata[0];
+    } elsif(/xy\s+xz\s+yz/) {
+      $cell[$ci][1][0]=$linedata[0];
+      $cell[$ci][2][0]=$linedata[1];
+      $cell[$ci][2][1]=$linedata[2];
+    } else {
+      print "**** error: unknown line in file $filename!\n";
+      close($filehandle); return 1;
+    }
+  }
+  
+  ############## read rest of data file ##########################
+  do {
+    $_ =~ s/(^\s+|#.*$|\s+$)//g;
+    my $keyword = $_;
+    $_ = <$filehandle>; $_ =~ s/(^\s+|#.*$|\s+$)//g;
+    if(length($_)!=0) {
+      print "**** error: empty line expected at beginning of section $keyword!\n";
+      close($filehandle); return 1;
+    }
+    if($keyword eq "Masses") {
+      $arrptr=\@masses;
+      $nmax=$nattypes;
+    } elsif($keyword eq "Bond Coeffs") {
+      $arrptr=\@bdtypes;
+      $nmax=$nbdtypes;
+    } elsif($keyword eq "Angle Coeffs") {
+      $arrptr=\@angtypes;
+      $nmax=$nangtypes;
+    } elsif($keyword eq "Dihedral Coeffs") {
+      $arrptr=\@dihtypes;
+      $nmax=$ndihtypes;
+    } elsif($keyword eq "Improper Coeffs") {
+      $arrptr=\@imptypes;
+      $nmax=$nimptypes;
+    } elsif($keyword eq "Atoms") {
+      $arrptr=\@atoms;
+      $nmax=$natoms;
+    } elsif($keyword eq "Velocities") {
+      $arrptr=\@vel;
+      $nmax=$natoms;
+    } elsif($keyword eq "Bonds") {
+      $arrptr=\@bonds;
+      $nmax=$nbonds;
+    } elsif($keyword eq "Angles") {
+      $arrptr=\@angles;
+      $nmax=$nangles;
+    } elsif($keyword eq "Dihedrals") {
+      $arrptr=\@dihedrals;
+      $nmax=$ndihedrals;
+    } elsif($keyword eq "Impropers") {
+      $arrptr=\@impropers;
+      $nmax=$nimpropers;
+    } else {
+      print "**** error: unknown keyword \"$keyword\"!\n";
+      close($filehandle); return 1;
+    }
+    for(my $i=0;$i<$nmax;$i++) {
+      $_ = <$filehandle>; $_ =~ s/(^\s+|#.*$|\s+$)//g;
+      @linedata = split(/\s+/,$_);
+      my $index = splice(@linedata,0,1)-1;
+      @{${$arrptr}[$index]} = @linedata;
+#       push(@{$arrptr},[@linedata]);
+    }
+    while(<$filehandle>) {
+      $_ =~ s/(^\s+|#.*$|\s+$)//g;
+      last if(length($_)!=0);
+    }
+  } while(not eof($filehandle));
+  close($filehandle);
+  # maybe we should check for sanity here...
+  
+  ############## adjust atom and type indices ####################
+  for(my $i=0;$i<@bonds;$i++) {
+    $bonds[$i][0]--;
+    $bonds[$i][1]--;
+    $bonds[$i][2]--;
+  }
+  @bonds = sort { $a->[1] <=> $b->[1] || $a->[2] <=> $b->[2] } @bonds;
+  
+  for(my $i=0;$i<@angles;$i++) {
+    $angles[$i][0]--;
+    $angles[$i][1]--;
+    $angles[$i][2]--;
+    $angles[$i][3]--;
+  }
+  @angles = sort { $a->[1] <=> $b->[1] || $a->[2] <=> $b->[2] || $a->[3] <=> $b->[3] } @angles;
+  
+  for(my $i=0;$i<@dihedrals;$i++) {
+    $dihedrals[$i][0]--;
+    $dihedrals[$i][1]--;
+    $dihedrals[$i][2]--;
+    $dihedrals[$i][3]--;
+    $dihedrals[$i][4]--;
+  }
+  @dihedrals = sort { $a->[1] <=> $b->[1] || $a->[2] <=> $b->[2] || $a->[3] <=> $b->[3]  || $a->[4] <=> $b->[4] } @dihedrals;
+  
+  for(my $i=0;$i<@impropers;$i++) {
+    $impropers[$i][0]--;
+    $impropers[$i][1]--;
+    $impropers[$i][2]--;
+    $impropers[$i][3]--;
+    $impropers[$i][4]--;
+  }
+  @impropers = sort { $a->[1] <=> $b->[1] || $a->[2] <=> $b->[2] || $a->[3] <=> $b->[3]  || $a->[4] <=> $b->[4] } @impropers;
+  
+  ############## build the bond map ##############################
+  my @atinmol=();
+  my @molsat=();
+  my @atbnd=();
+  for(my $i=0;$i<@bonds;$i++) {
+    my $at1 = $bonds[$i][1];
+    my $at2 = $bonds[$i][2];
+    push(@{$atbnd[$at1]},$i);
+    push(@{$atbnd[$at2]},$i);
+    if(defined($atinmol[$at1])) {
+      if(defined($atinmol[$at2])) {
+        if($atinmol[$at1]!=$atinmol[$at2]) {
+          # we have to join the fragments
+          my $tmp = $atinmol[$at2];
+          foreach $a (@{$molsat[$tmp]}) {
+            $atinmol[$a]=$atinmol[$at1];
+          }
+          push(@{$molsat[$atinmol[$at1]]},splice(@{$molsat[$tmp]},0));
+        } # otherwise it's a ring
+      } else {
+        # put the second atom in the same mol as the first
+        push(@{$molsat[$atinmol[$at1]]},$at2);
+        $atinmol[$at2] = $atinmol[$at1];
+      }
+    } elsif(defined($atinmol[$at2])) {
+      # put the first atom in the same mol as the second
+      push(@{$molsat[$atinmol[$at2]]},$at1);
+      $atinmol[$at1] = $atinmol[$at2];
+    } else {
+      # create a new molecule and pack both atoms in it
+      push(@molsat,[$at1,$at2]);
+      $atinmol[$at1] = $#molsat;
+      $atinmol[$at2] = $#molsat;
+    }
+  }
+  undef @atinmol;
+  # delete empty mols
+  for(my $i=$#molsat;$i>=0;$i--) {
+    splice(@molsat,$i,1) if($molsat[$i]=="");
+  }
+  @molsat = sort {$a->[0] <=> $b->[0]} @molsat;
+  ############## sort into mol types #############################
+  my @molintype=();
+  my @typemols=();
+  itermol:for(my $i=0;$i<@molsat;$i++) {
+    # compare with molecules already checked
+    cmpmol:for(my $j=$i-1;$j>=0;$j--) {
+      next if($#{$molsat[$i]} != $#{$molsat[$j]}); # number of atoms
+      # compare atom types
+      for(my $k=0;$k<@{$molsat[$i]};$k++) {
+        my $a = $molsat[$i][$k];
+        my $b = $molsat[$j][$k];
+        if($atoms[$a][1]!=$atoms[$b][1]) {
+          next cmpmol;
+        }
+      }
+      # found a match:
+      $molintype[$i]=$molintype[$j];
+      push(@{$typemols[$molintype[$j]]},$i);
+      next itermol;
+    }
+    # no match found:
+    push(@{$typemols[$#typemols+1]},$i);
+    $molintype[$i]=$#typemols;
+  }
+
+  ############## fill field data #################################
+  $field_nummols[$fi] = $#typemols+1;
+  for(my $t=0;$t<@typemols;$t++) {
+    $mol_numents[$fi][$t]  = $#{$typemols[$t]};
+    $mol_numatoms[$fi][$t] = $#{$molsat[$typemols[$t][0]]};
+    if($cell[$ci][1][0]!=0 or $cell[$ci][2][0]!=0 or $cell[$ci][2][1]!=0) {
+      $periodic_key[$ci]=3;
+    } else {
+      $periodic_key[$ci]=2;
+    }
+    for(my $m=0;$m<@{$typemols[$t]};$m++) {
+      my $mold=$typemols[$t][$m];
+      for(my $a=0;$a<@{$molsat[$mold]};$a++) {
+        my $aold=$molsat[$mold][$a];
+        my $type=$atoms[$aold][1];
+        $cdata[$ci][$t][$m][$a][0] = $atoms[$aold][3];
+        $cdata[$ci][$t][$m][$a][1] = $atoms[$aold][4];
+        $cdata[$ci][$t][$m][$a][2] = $atoms[$aold][5];
+        if(@vel) {
+          $cdata[$ci][$t][$m][$a][3] = $vel[$aold][0];
+          $cdata[$ci][$t][$m][$a][4] = $vel[$aold][1];
+          $cdata[$ci][$t][$m][$a][5] = $vel[$aold][2];
+        }
+        $cdata[$ci][$t][$m][$a][9]  = $type;
+        $cdata[$ci][$t][$m][$a][11] = $aold;
+        $cdata[$ci][$t][$m][$a][12] = $masses[$type];
+        $cdata[$ci][$t][$m][$a][13] = $atoms[$aold][2];
+      }
+    }
+    $mol_charge[$fi][$t]=0;
+    $mol_mass[$fi][$t]=0;
+    for(my $a=0;$a<@{$molsat[0]};$a++) {
+      my $aold=$molsat[0][$a];
+      my $type=$atoms[$molsat[0][$a]][1];
+      $mol_atomdata[$fi][$t][$a][0] = $type;
+      $mol_atomdata[$fi][$t][$a][1] = $masses[$type];
+      $mol_atomdata[$fi][$t][$a][2] = $atoms[$aold][2];
+      $mol_charge[$fi][$t] += $mol_atomdata[$fi][$t][$a][2];
+      $mol_mass[$fi][$t]   += $mol_atomdata[$fi][$t][$a][1];
+    }
+  }
+}
+
+sub print2darr {
+  my @arr = @{$_[0]};  
+  for(my $i=0;$i<@arr;$i++) {
+    print $#{$arr[$i]}+1," atoms: ";
+    print join(" ",@{$arr[$i]}),"\n";
+  }
+}
 
 our(@lmp_numstyles,@lmp_styles,@lmp_coeffs,$lmp_units,@lmp_fixes,%dcd_natoms,
 %dcd_title,%dcd_timestep,%dcd_extra_block,%dcd_is_charmm,@lmp_atomtypes,
-%dcd_frame,%dcd_startframe,%dcd_step,@ldata,@ldata_names,
-$fmass,$ftime,$flength,$fenergy,$fpress,$fcharge,$fdipole);
+%dcd_frame,%dcd_startframe,%dcd_endframe,%dcd_step,%dcd_has_4dims,%dcd_nframes,,
+%dcd_timestep_length,%dcd_startbyte,@ldata,@ldata_names,$fmass,$ftime,$flength,
+$fenergy,$fpress,$fcharge,$fdipole);
 # indices for arrays:
 #   styles:  atomtypes:
 # 0 bond     name/element
@@ -185,54 +473,140 @@ sub read_lammpstrj_timestep {
   return 0;
 }
 
+sub clear_dcd {
+  my $fh = $_[0];
+  undef $dcd_natoms{$fh};
+  undef $dcd_nframes{$fh};
+  undef $dcd_timestep{$fh};
+  undef $dcd_extra_block{$fh};
+  undef $dcd_has_4dims{$fh};
+  undef $dcd_is_charmm{$fh};
+  undef $dcd_startframe{$fh};
+  undef $dcd_step{$fh};
+  undef $dcd_frame{$fh};
+  undef $dcd_title{$fh};
+  undef $dcd_timestep_length{$fh};
+}
+
+sub read_fortran_record {
+  my $fh = $_[0];
+  my($tmp,$content,$len);
+  return undef unless(read($fh,$tmp, 4));
+  $len = unpack('l',$tmp);
+  return undef unless(read($fh, $content, $len));
+  return undef unless(read($fh,$tmp, 4));
+  return undef if($len != unpack('l',$tmp));
+  return $content;
+}
+
 sub read_dcd_header {
   my $fh = $_[0];
-  my($bytes,$bytes_read,$is_charmm,$extra_block,$has_4dims);
-  $bytes_read = read($fh, $bytes, 88);
-  return 1 unless($bytes_read==88);
-  return 1 unless(unpack('l',$bytes)==84); # first entry must be "84"
-  my $totframes  = unpack('@8l',$bytes);
-  my $startframe = unpack('@12l',$bytes);
-  my $stepframe  = unpack('@16l',$bytes);
-  my $endframe = unpack('@20l',$bytes);
-  my $timestep = unpack('@44f',$bytes);
-  # check if it's a CHARMM file
-  if(unpack('@84l',$bytes)!=0) {
-    $is_charmm   = 1;
-    $extra_block = 1 if(unpack('@48l',$bytes)!=0);
-    $has_4dims   = 1 if(unpack('@52l',$bytes)!=0);
+  my($content,@data);
+  unless(defined($fh)) {
+    print "**** error: no DCD file in handle in call of read_dcd_header!\n";
+    return 3;
+  }
+  $content = read_fortran_record($fh);
+  unless(defined($content)) {
+    print "**** error reading DCD header!\n";
+    return 3;
+  }
+  @data=unpack('c4i9f1i10',$content);
+#   for(my $i=0;$i<@data;$i++) {
+#     print "$i $data[$i]\n";
+#   }
+#   print join(" ",@data),"\n";
+  $content = read_fortran_record($fh);
+  my $ntitle=unpack('l',$content);
+  for(my $i=0;$i<$ntitle;$i++) {
+    $dcd_title{$fh}[$i] = unpack('@'.(4+$i*80).'A80',$content);
+  }
+  $content = read_fortran_record($fh);
+  unless(defined($content)) {
+    clear_dcd($fh);
+    print "**** error reading DCD header!\n";
+    return 1;
+  }
+  $dcd_natoms{$fh}=unpack('l',$content);
+  $dcd_startframe{$fh} = $data[5];
+  $dcd_frame{$fh}      = $data[5]; # same as startframe
+  $dcd_step{$fh}       = $data[6];
+  $dcd_endframe{$fh}   = $data[7];
+  $dcd_timestep{$fh}   = $data[13];
+  if($data[23]!=0) {
+    $dcd_extra_block{$fh} = $data[14];
+    $dcd_has_4dims{$fh}   = $data[15];
+    $dcd_is_charmm{$fh}   = 1;
   } else {
-    my $dcd_is_charmm=0;
+    $dcd_extra_block{$fh} = 0;
+    $dcd_has_4dims{$fh}   = 0;
+    $dcd_is_charmm{$fh}   = 0;
   }
-  # second header block
-  $bytes_read = read($fh, $bytes, 4);
-  return 1 unless(unpack('l',$bytes)==84); # first entry must be "84"
-  $bytes_read = read($fh, $bytes, 4); # number of bytes 
-  $bytes_read = read($fh, $bytes, 4);
-  my $ntitle = unpack('l',$bytes),"\n";
-  my @title=();
-  for(my $i=0;$i<$ntitle;$i++) {
-    $bytes_read = read($fh, $bytes, 80);
-    $title[$i]=unpack('A80',$bytes),"\n";
+  if($dcd_has_4dims{$fh}) {
+    $dcd_timestep_length{$fh}=(4*$dcd_natoms{$fh}+8)*4;
+  } else {
+    $dcd_timestep_length{$fh}=(4*$dcd_natoms{$fh}+8)*3;
   }
-  $bytes_read = read($fh, $bytes, 4);
-  $bytes_read = read($fh, $bytes, 4);
-  return 1 unless(unpack('l',$bytes)==4); # here must be "4"
-  $bytes_read = read($fh, $bytes, 4);
-  my $natoms=unpack('l',$bytes);
-  $bytes_read = read($fh, $bytes, 4);
-  return 1 unless(unpack('l',$bytes)==4); # here must be "4"
-  # copy data
-  $dcd_natoms{$fh}=$natoms;
-  $dcd_timestep{$fh}=$timestep;
-  $dcd_extra_block{$fh}=$extra_block;
-  $dcd_is_charmm{$fh}=$is_charmm;
-  $dcd_startframe{$fh}=$startframe;
-  $dcd_step{$fh}=$stepframe;
-  for(my $i=0;$i<$ntitle;$i++) {
-    $dcd_title{$fh}[$i]=$title[$i];
+  $dcd_timestep_length{$fh}+=56 if($dcd_extra_block{$fh});
+  $dcd_step{$fh}=1 if($dcd_step{$fh}<=0);
+  if($dcd_endframe{$fh}<$dcd_nframes{$fh}*$dcd_step{$fh}) {
+    $dcd_endframe{$fh}=$dcd_nframes{$fh}*$dcd_step{$fh};
   }
-  $dcd_frame{$fh}=0;
+  $dcd_startbyte{$fh} = tell($fh);
+  return 0;
+}
+
+sub goto_dcd_timestep {
+  # first argument:  filehandle
+  # second argument: frame number (<0 => jump to end)
+  unless(defined($_[0])) {
+    print "**** error: no DCD file in handle in call of goto_dcd_timestep!\n";
+    return 1;
+  }
+  unless(defined($_[1])) {
+    print "**** error: frame number not defined in call of goto_dcd_timestep\n";
+    return 1;
+  }
+  unless(defined($dcd_natoms{$_[0]})) {
+    return 1 unless(read_dcd_header($_[0])==0);
+  }
+  return goto_last_dcd_timestep($_[0]) if($_[1]<0);
+  if($_[1]<$dcd_startframe{$_[0]}) {
+    print "**** error: desired frame $_[1] smaller than start frame of DCD ($dcd_startframe{$_[0]})!\n";
+    return 1;
+  }
+  if($_[1]>$dcd_endframe{$_[0]}) {
+    print "**** error: desired frame $_[1] larger than end frame of DCD ($dcd_endframe{$_[0]})!\n";
+    return 1;
+  }
+  if(($_[1]-$dcd_startframe{$_[0]})%$dcd_step{$_[0]} != 0) {
+    print "**** error: desired frame $_[1] does not fit frame pattern\n",
+          "            of DCD (start $dcd_startframe{$_[0]} step $dcd_step{$_[0]})!\n";
+    return 1;
+  }
+  seek($_[0],$dcd_startbyte{$_[0]}+$dcd_timestep_length{$_[0]}*($_[1]-$dcd_startframe{$_[0]})/$dcd_step{$_[0]},0);
+  return 0;
+}
+
+sub skip_dcd_timestep {
+  # first argument:  filehandle
+  # second argument: number of frames to skip (optional)
+  my $nskip=$_[1];
+  $nskip=1 unless(defined($nskip));
+  unless(defined($dcd_natoms{$_[0]})) {
+    return 1 unless(read_dcd_header($_[0])==0);
+  }
+  seek($_[0],$nskip*$dcd_timestep_length{$_[0]},1);
+  $dcd_frame{$_[0]}+=$dcd_step{$_[0]};
+  return 0;
+}
+
+sub goto_last_dcd_timestep {
+  unless(defined($dcd_natoms{$_[0]})) {
+    return 1 unless(read_dcd_header($_[0])==0);
+  }
+  seek($_[0],-$dcd_timestep_length{$_[0]},2);
+  $dcd_frame{$_[0]}+=$dcd_endframe{$_[0]}-$dcd_step{$_[0]};
   return 0;
 }
 
@@ -240,28 +614,18 @@ sub read_dcd_timestep {
   my $fh=$_[0];
   my $fi=$_[1];
   my $ci=$_[2];
-  my($bytes,$bytes_read,@coords);
+  my($content,@data,$cmax,$str);
   return 2 if($ci<0);
   return 3 unless(defined($fh));
-  
-  if(not defined $dcd_natoms{$fh}) {
-    if(read_dcd_header($fh)!=0) {
-      return 4;
-    }
+  unless(defined($dcd_natoms{$fh})) {
+    return 4 unless(read_dcd_header($fh)==0);
   }
   if($fi>=0 and $field_numatoms[$fi]!=$dcd_natoms{$fh}) {
     print "**** error: number of atoms in FIELD file does not match number of atoms in dcd file!\n";
     return 1;
   }
-  
-  # check whether we're at the end of the file
-  my $nbytes=-1;
-  my $currpos=tell($fh);
-  $bytes_read = read($fh, $bytes, 4);
-  $nbytes = unpack('l',$bytes) if($nbytes<0);
-  return -1 unless($bytes_read==4);
-  seek($fh,$currpos,0);
-  
+  $content = read_fortran_record($fh);
+  return -1 unless(defined $content); # probably the end of the file
   #reset values
   @{$cdata[$ci]} = ();
   @{$cell[$ci]}  = ();
@@ -271,64 +635,41 @@ sub read_dcd_timestep {
   undef $frame_number[$ci];
   undef $frame_numatoms[$ci];
   undef $periodic_key[$ci];
-  
   if($dcd_extra_block{$fh}) {
-    $bytes_read = read($fh, $bytes, 4);
-    unless(unpack('l',$bytes)==48) {# here must be "48"
-      print "**** error: expected \"48\" in extra block of dcd file!\n";
-      return 1;
-    }
-    $bytes_read = read($fh, $bytes, 48);
-    my @d=unpack("d d d d d d",$bytes);
-    $bytes_read = read($fh, $bytes, 4);
-    unless(unpack('l',$bytes)==48) {# here must be "48"
-      print "**** error: expected \"48\" in extra block of dcd file!\n";
-      return 1;
-    }
-    @{$cell[$ci]}=calc_cell_vecs($d[0],$d[2],$d[5],acos($d[4]),acos($d[3]),acos($d[1]));
+    @data=unpack("d6",$content); # cell data
+    @{$cell[$ci]}=calc_cell_vecs($data[0],$data[2],$data[5],acos($data[4]),acos($data[3]),acos($data[1]));
     $size[$ci][0] = ($cell[$ci][0][0] + $cell[$ci][1][0] + $cell[$ci][2][0])/2;
     $size[$ci][1] = ($cell[$ci][0][1] + $cell[$ci][1][1] + $cell[$ci][2][1])/2;
     $size[$ci][2] = ($cell[$ci][0][2] + $cell[$ci][1][2] + $cell[$ci][2][2])/2;
+#     print "cell: ",join(" ",@data),"\n";
   }
-  
-  for(my $c=0;$c<3;$c++) {
-    $bytes_read = read($fh, $bytes, 4);
-    $nbytes = unpack('l',$bytes);
-    unless($nbytes/4==$dcd_natoms{$fh}) { # must be 4*N bytes for x/y/z arrays
-      print "**** error: unexpected end of dcd file!\n";
-      return 1;
-    }
-    $bytes_read = read($fh, $coords[$c], $nbytes);
-    unless($bytes_read==$nbytes) {
-      print "**** error: unexpected end of dcd file!\n";
-      return 1;
-    }
-    $bytes_read = read($fh, $bytes, 4);
-    unless($nbytes/4==$dcd_natoms{$fh}) {
-      print "**** error: unexpected end of dcd file!\n";
-      return 1;
-    }
-  }
-  
+  $cmax=3;
+  $cmax=4 if($dcd_has_4dims{$fh});
+  $str="f$dcd_natoms{$fh}";
   if($fi<0) {
-    for(my $i=0;$i<$dcd_natoms{$fh};$i++) {
-      for(my $c=0;$c<3;$c++) {
-        $cdata[$ci][0][0][$i][$c] = unpack("\@".($i*4)."f",$coords[$c]);
+    for(my $c=0;$c<$cmax;$c++) {
+      $content = read_fortran_record($fh);
+      @data=unpack($str,$content);
+      for(my $i=0;$i<$dcd_natoms{$fh};$i++) {
         $cdata[$ci][0][0][$i][11] = $i;
-        $minpos[$ci][$c] = $cdata[$ci][0][0][0][$c] if($cdata[$ci][0][0][0][$c]<$minpos[$ci][$c]);
-        $maxpos[$ci][$c] = $cdata[$ci][0][0][0][$c] if($cdata[$ci][0][0][0][$c]>$maxpos[$ci][$c]);
+        $cdata[$ci][0][0][$i][$c] = $data[$i];
+        $minpos[$ci][$c] = $cdata[$ci][0][0][$i][$c] if($cdata[$ci][0][0][$i][$c]<$minpos[$ci][$c]);
+        $maxpos[$ci][$c] = $cdata[$ci][0][0][$i][$c] if($cdata[$ci][0][0][$i][$c]>$maxpos[$ci][$c]);
       }
     }
   } else {
+    @data=();
+    for(my $c=0;$c<$cmax;$c++) {
+      $content = read_fortran_record($fh);
+      push(@data,[unpack($str,$content)]);
+    }
     my $i=0;
     my $molindex = 0;
     for(my $t=0;$t<$field_nummols[$fi];$t++) {
-      @{$cdata[$ci][$t]}=();
       for(my $m=0;$m<$mol_numents[$fi][$t];$m++) {
-        @{$cdata[$ci][$t][$m]}=();
         for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
-          for(my $c=0;$c<3;$c++) {
-            $cdata[$ci][$t][$m][$a][$c] = unpack("\@".($i*4)."f",$coords[$c]);
+          for(my $c=0;$c<$cmax;$c++) {
+            $cdata[$ci][$t][$m][$a][$c] = $data[$c][$i];
           }
           $cdata[$ci][$t][$m][$a][9]  = $mol_atomdata[$fi][$t][$a][0];
           $cdata[$ci][$t][$m][$a][10] = $molindex;
@@ -341,59 +682,14 @@ sub read_dcd_timestep {
       }
     }
   }
-  $frame_number[$ci]=$dcd_startframe{$fh}+$dcd_frame{$fh}*$dcd_step{$fh};
   $frame_numatoms[$ci]=$dcd_natoms{$fh};
-  if($dcd_extra_block{$fh}) {
-    if(check_orthogonal($ci)) {
-      $periodic_key[$ci]=2;
-    } else {
-      $periodic_key[$ci]=3;
-    }
-  } else {
-    $periodic_key[$ci]=0;
-  }
-  $config_key[$ci]=0;
-  $dcd_frame{$fh}++;
+  $frame_number[$ci]=$dcd_frame{$fh};
+  $dcd_frame{$fh}+=$dcd_step{$fh};
   return 0;
 }
 
-sub find_last_dcd_timestep {
-  my $fh=$_[0];
-  my($bytes,$bytes_read,$currpos,$currposold,$err);
-  
-  return 3 unless(defined($fh));
-  
-  if(not defined $dcd_natoms{$fh}) {
-    if(read_dcd_header($fh)!=0) {
-      return 4;
-    }
-  }
-  # check whether we're at the end of the file
-  $err=0;
-  $currpos=tell($fh);
-  $currposold=$currpos;
-  while($err==0) {
-    if($dcd_extra_block{$fh}) {
-      $bytes_read = read($fh, $bytes, 56);
-    }
-    $bytes_read = read($fh, $bytes, 24+$dcd_natoms{$fh}*12);
-    last if($bytes_read!=24+$dcd_natoms{$fh}*12);
-    $currposold=$currpos;
-    $dcd_frame{$fh}++;
-    $currpos=tell($fh);
-  }
-  seek($fh,$currposold,0);
-}
-
 sub close_dcd_file {
-  undef $dcd_extra_block{$_[0]};
-  undef $dcd_frame{$_[0]};
-  undef $dcd_is_charmm{$_[0]};
-  undef $dcd_natoms{$_[0]};
-  undef $dcd_startframe{$_[0]};
-  undef $dcd_step{$_[0]};
-  undef $dcd_timestep{$_[0]};
-  undef $dcd_title{$_[0]};
+  clear_dcd{$_[0]};
   close($_[0]);
 }
 
@@ -527,21 +823,96 @@ sub read_logfile {
 
 1;
 
+sub write_dcd_timestep {
+  my($fh,$fi,$ci,$packed,$nbytes,$n);
+  ($fh,$fi,$ci) = @_;
+  return if(not defined $dcd_natoms{$fh});
+  $nbytes = $dcd_natoms{$fh}*4;
+  for(my $c=0;$c<3;$c++) {
+    print $fh pack('l<',$nbytes);
+    $n=0;
+    for(my $t=0;$t<@{$cdata[$ci]};$t++) {
+      for(my $m=0;$m<@{$cdata[$ci][$t]};$m++) {
+        for(my $a=0;$a<@{$cdata[$ci][$t][$m]};$a++) {
+          $n++;
+          print $fh pack('f<',$cdata[0][$t][$m][$a][$c]);
+        }
+      }
+    }
+    print $fh pack('l<',$nbytes);
+    if($n!=$dcd_natoms{$fh}) {
+      print "**** error: number of atoms ($n) does not match dcd file ($dcd_natoms{$fh})\n";
+    }
+  }
+}
+
+sub open_dcd_write {
+  my($fh,$filename,$natoms,$timestep,$startframe,$endframe,$stepframe,$has_4dims,
+  $extra_block,$is_charmm,$title);
+  ($filename,$natoms,$title,$extra_block,$has_4dims,$timestep) = @_;
+  $extra_block = 0 if(not defined($extra_block));
+  $has_4dims   = 0 if(not defined($has_4dims));
+  $timestep    = 1 if(not defined($timestep));
+  $title       = "" if(not defined($title));
+  $startframe  = 0;
+  $stepframe   = 1;
+  
+  if(not open($fh, ">:raw", $filename)) {
+    print "**** error: Can't open DCD file \"$filename\": $!\n";
+    return undef;
+  }
+  
+  if($extra_block or $has_4dims) {
+    $is_charmm=24;
+    $dcd_is_charmm{$fh}=1;
+  }
+  $dcd_frame{$fh}       = 0;
+  $dcd_is_charmm{$fh}   = 1;
+  $dcd_natoms{$fh}      = $natoms;
+  $dcd_timestep{$fh}    = $timestep;
+  $dcd_extra_block{$fh} = $extra_block;
+  $dcd_has_4dims{$fh}   = $has_4dims;
+  $dcd_step{$fh}        = $stepframe;
+  $dcd_startframe{$fh}  = $startframe;
+  $dcd_title{$fh}[0]    = $title;
+  $dcd_title{$fh}[1]    = "written by perl";
+  
+  print $fh pack('(lA[4]l[9]fl[11])<',
+    84,
+    "CORD",
+    $dcd_frame{$fh},  # number of frames
+    $dcd_startframe{$fh},
+    $dcd_step{$fh},
+    0,0,0,0,0,0, # six zeros
+    $dcd_timestep{$fh},
+    $dcd_extra_block{$fh},
+    $dcd_has_4dims{$fh},
+    0,0,0,0,0,0,0, # seven zeros,
+    $is_charmm,
+    84);
+  print $fh pack('(llA[80]A[80]l)<',
+    164,2,$dcd_title{$fh}[0],$dcd_title{$fh}[1],164);
+  print $fh pack('(lll)<',
+  4,$dcd_natoms{$fh},4);
+  
+  return $fh;
+}
+
 __END__
 # Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 
-dlpoly_utility - Perl extension for blah blah blah
+lammps_utility - Perl extension for blah blah blah
 
 =head1 SYNOPSIS
 
-  use dlpoly_utility;
+  use lammps_utility;
   blah blah blah
 
 =head1 DESCRIPTION
 
-Stub documentation for dlpoly_utility, created by h2xs. It looks like the
+Stub documentation for lammps_utility, created by h2xs. It looks like the
 author of the extension was negligent enough to leave the stub
 unedited.
 

@@ -217,6 +217,7 @@ for($i=2;$i<@ARGV;$i++) {
       $i += 2;
     } case (/^-y$/ or /^--multiply/) { # multiply system
       $lwarnremap = 1 if(not $lremap);
+      $lneedfield = 1;
       if(not check_integer(@ARGV[$i+1..$i+3])) {
 	print "**** error: multiplication factors must be three integer numbers!\n";
 	exit 1;
@@ -292,10 +293,8 @@ if($informat =~ /^hist$/i) { # read HISTORY file
       exit 1;
     }
   } else { # read the last frame
-    while($err==0) {
-      $err=read_dcd_timestep($fhhist,$fi,0);
-    }
-    exit 1 if($err>0);
+    exit 1 unless(goto_last_dcd_timestep($fhhist)==0);
+    exit 1 unless(read_dcd_timestep($fhhist,$fi,0)==0);
   }
   close($fhhist);
 } elsif($informat =~ /^xyz$/i) { # read xyz file
@@ -322,24 +321,6 @@ if($informat =~ /^hist$/i) { # read HISTORY file
 } else { # read CONFIG file
   exit 1 if(read_config_file($incfg,$fi,0)!=0);
 }
-
-########## unwrap if desired #########################################################
-
-if($lremap) {
-  for($t=0;$t<$field_nummols[0];$t++) {
-  print "remapping $mol_name[0][$t]\n";
-    if($mol_name[0][$t]=~/PA/) {
-      for($m=0;$m<$mol_numents[0][$t];$m++) {
-	remap_molecule2(0,0,$t,$m,10);
-      }
-    } else {
-      for($m=0;$m<$mol_numents[0][$t];$m++) {
-	remap_molecule2(0,0,$t,$m);
-      }
-    }
-  }
-}
-
 
 ########## perform operations #########################################################
 
@@ -490,6 +471,20 @@ for($i=2;$i<@ARGV;$i++) {
       $i++;
       $periodic_key[0] = $ARGV[$i];
       
+    } case (/^-r$/ or /^--remap/ or /^--unwrap/) {
+      for($t=0;$t<$field_nummols[0];$t++) {
+      print "remapping $mol_name[0][$t]\n";
+        if($mol_name[0][$t]=~/PA/) {
+          for($m=0;$m<$mol_numents[0][$t];$m++) {
+            remap_molecule2(0,0,$t,$m,10);
+          }
+        } else {
+          for($m=0;$m<$mol_numents[0][$t];$m++) {
+            remap_molecule2(0,0,$t,$m);
+          }
+        }
+      }
+      
     } case (/^-v/ or /^--cell[-_]vec/) { #cell vectors
       print "changing cell vectors\n";
       for($k=0;$k<3;$k++) {
@@ -534,6 +529,11 @@ for($i=2;$i<@ARGV;$i++) {
 	}
       }
       
+    } case (/^-to/ or /^--truncated/) { # cut truncated octahedron
+      print "cutting truncated octahedron\n";
+      &cut_truncated_octahedron(0,0,$ARGV[$i+1],$ARGV[$i+2]);
+      $i+=2;
+      
     } case (/^-t/ or /^--types/) { # include types
       print "removing atom types\n";
       @include=();
@@ -556,11 +556,6 @@ for($i=2;$i<@ARGV;$i++) {
 	  }
 	}
       }
-      
-    } case (/^-to/ or /^--truncated/) { # cut truncated octahedron
-      print "cutting truncated octahedron\n";
-      &cut_truncated_octahedron(0,0,$ARGV[$i+1],$ARGV[$i+2]);
-      $i+=2;
       
     } case (/^-u$/ or /^--rotat.*$/) { # rotate system
       print "rotating system\n";
@@ -604,11 +599,7 @@ for($i=2;$i<@ARGV;$i++) {
 	for($m=0;$m<@{$cdata[0][$t]};$m++) {
 	  for($a=0;$a<@{$cdata[0][$t][$m]};$a++) {
 	    foreach $c (@wrap) {
-	      if($cdata[0][$t][$m][$a][$c]>0) {
-		$cdata[0][$t][$m][$a][$c] -= int($cdata[0][$t][$m][$a][$c]/$size[0][$c])*$size[0][$c]*2.0;
-	      } else {
-		$cdata[0][$t][$m][$a][$c] += int(-$cdata[0][$t][$m][$a][$c]/$size[0][$c])*$size[0][$c]*2.0;
-	      }
+	      $cdata[0][$t][$m][$a][$c] -= int($cdata[0][$t][$m][$a][$c]/$size[0][$c])*$size[0][$c]*2.0;
 	    }
 	  }
 	}
