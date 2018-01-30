@@ -4,17 +4,14 @@ use hanno_utility;
 use dlpoly_utility;
 use lammps_utility;
 use Math::Trig;
+use Math::Vector::Real;
 use Cwd;
-use strict;
+# use strict;
 
-open(my $fh,"<",$ARGV[0]);
-my $ftot=0;
-while(<$fh>) {
-  $_=~s/(^\s+|\s+$)//;
-  next if(/^#/);
-  my @data=split(/\s+/,$_);
-  $ftot+=20000*$data[2]+250000;
+$i=1;
+$j=2;
+
+$test=($i==$j);
+if($test) {
+  print "$test\n";
 }
-$ftot/=1e6;
-print "$ftot\n";
-close($fh);

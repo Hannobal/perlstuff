@@ -475,17 +475,17 @@ sub read_lammpstrj_timestep {
 
 sub clear_dcd {
   my $fh = $_[0];
-  undef $dcd_natoms{$fh};
-  undef $dcd_nframes{$fh};
-  undef $dcd_timestep{$fh};
-  undef $dcd_extra_block{$fh};
-  undef $dcd_has_4dims{$fh};
-  undef $dcd_is_charmm{$fh};
-  undef $dcd_startframe{$fh};
-  undef $dcd_step{$fh};
-  undef $dcd_frame{$fh};
-  undef $dcd_title{$fh};
-  undef $dcd_timestep_length{$fh};
+  delete $dcd_natoms{$fh};
+  delete $dcd_nframes{$fh};
+  delete $dcd_timestep{$fh};
+  delete $dcd_extra_block{$fh};
+  delete $dcd_has_4dims{$fh};
+  delete $dcd_is_charmm{$fh};
+  delete $dcd_startframe{$fh};
+  delete $dcd_step{$fh};
+  delete $dcd_frame{$fh};
+  delete $dcd_title{$fh};
+  delete $dcd_timestep_length{$fh};
 }
 
 sub read_fortran_record {
@@ -585,6 +585,7 @@ sub goto_dcd_timestep {
     return 1;
   }
   seek($_[0],$dcd_startbyte{$_[0]}+$dcd_timestep_length{$_[0]}*($_[1]-$dcd_startframe{$_[0]})/$dcd_step{$_[0]},0);
+  $dcd_frame{$_[0]} = $_[1];
   return 0;
 }
 
@@ -666,8 +667,11 @@ sub read_dcd_timestep {
     my $i=0;
     my $molindex = 0;
     for(my $t=0;$t<$field_nummols[$fi];$t++) {
+      @{$cdata[$ci][$t]}=();
       for(my $m=0;$m<$mol_numents[$fi][$t];$m++) {
+        @{$cdata[$ci][$t][$m]}=();
         for(my $a=0;$a<$mol_numatoms[$fi][$t];$a++) {
+          @{$cdata[$ci][$t][$m][$a]}=();
           for(my $c=0;$c<$cmax;$c++) {
             $cdata[$ci][$t][$m][$a][$c] = $data[$c][$i];
           }
@@ -689,7 +693,7 @@ sub read_dcd_timestep {
 }
 
 sub close_dcd_file {
-  clear_dcd{$_[0]};
+  clear_dcd($_[0]);
   close($_[0]);
 }
 
@@ -791,7 +795,7 @@ sub convert_vdw {
 sub read_logfile {
   my $filename = $_[0];
   my $li       = $_[1]; # index for array of field-data
-  my($fh,$line,$i,@data,$first,@split);
+  my($fh,$line,$i,@data,$first,@split,$continue);
   if($li<0) {
     print "**** error: index \$li must not be smaller than zero in sub read_field_file\n";
     return 1;
@@ -803,9 +807,15 @@ sub read_logfile {
   undef @{$ldata[$li]};
   @{$ldata[$li]} = ();
   $first=1;
+  $continue=0;
   while(<$fh>) {
     $_=~s/(^\s+|\s+$)//g;
+    $continue=1 if(/minimiz/i);
     if(/^[0-9\s\-\+eE.]+$/ and /[0-9]/) {
+      if($continue) {
+        $continue=2;
+        next;
+      }
       if($first) {
         $first=0;
         @{$ldata_names[$li]}=split(/\s+/,$line);
@@ -814,6 +824,7 @@ sub read_logfile {
       next if($#split!=$#{$ldata_names[$li]});
       push(@{$ldata[$li]},[@split]);
     } else {
+      $continue=0 if($continue==2);
       $line=$_;
     }
   }

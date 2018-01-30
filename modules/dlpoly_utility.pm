@@ -46,7 +46,7 @@ our @EXPORT = qw(@cell @size @config_key @config_title @periodic_key @cdata @fra
     calc_dvec_orthocell calc_dvec_orthocell_vec calc_center_of_mass_orthocell calc_dipole_moment
     cut_truncated_octahedron calc_cell_abc calc_cell_vecs print_statis_data_header print_statis_data
     calc_angle calc_angle_orthocell rotate_cell_vmd read_rdfdat_file print_rdfdat_data read_zdndat_file
-    print_zdndat_data check_orthogonal clear_field_data
+    print_zdndat_data check_orthogonal clear_field_data find_molname cut_octahedron
     
     @mol2_name @mol2_numatoms @mol2_numbonds @mol2_numsubst @mol2_numfeat @mol2_numsets @mol2_moltype 
     @mol2_chargemethod @mol2_atomdata @mol2_bonddata @mol2_substdata @mol2_atomtypes @mol2_statusbits 
@@ -618,6 +618,18 @@ sub write_field_file {
   print $filehandle "CLOSE";
   close($filehandle);
   return 0;
+}
+
+sub find_molname {
+  # find a molecule name in a FIELD file
+  my $fi       = $_[0]; # index for array of field-data
+  my $name     = $_[1]; # index for array of field-data
+  return -1 if($fi<0);
+  return -1 if(not defined($field_nummols[$fi]));
+  for(my $t=0;$t<$field_nummols[$fi];$t++) {
+    return $t if($mol_name[$fi][$t]=~/^$name$/i)
+  }
+  return -1;
 }
 
 sub read_control_file {
@@ -2916,6 +2928,42 @@ sub calc_dipole_moment {
   return @vec;
 }
 
+sub cut_octahedron {
+  my ($t,$m,$a,$i,$x,$y,$z,@vec,@d,$dist,$buffer,$ci,$fi,$lface);
+  $ci      = $_[0];
+  $fi      = $_[1];
+  $lface   = $_[2]; # center-face distance = sqrt(6)/6 a
+  $buffer  = $_[3]; # optional buffer zone to avoid overlap of molecules at boundaries
+  $buffer  = 0 if(not defined($buffer));
+  $x=1.0/sqrt(3);
+  @{$vec[0]} = ( $x, $x, $x);
+  @{$vec[1]} = ( $x, $x,-$x);
+  @{$vec[2]} = ( $x,-$x, $x);
+  @{$vec[3]} = ( $x,-$x,-$x);
+  @{$vec[4]} = (-$x, $x, $x);
+  @{$vec[5]} = (-$x, $x,-$x);
+  @{$vec[6]} = (-$x,-$x, $x);
+  @{$vec[7]} = (-$x,-$x,-$x);
+  @d=($lface,$lface,$lface,$lface,$lface,$lface,$lface,$lface);
+  for($t=0;$t<$field_nummols[$ci];$t++) {
+    loopmol:for($m=0;$m<$mol_numents[$ci][$t];$m++) {
+      for($a=0;$a<$mol_numatoms[$ci][$t];$a++) {
+	for($i=0;$i<@vec;$i++) {
+	  $dist  = $buffer-$d[$i];
+	  $dist += $vec[$i][0]*$cdata[$ci][$t][$m][$a][0];
+	  $dist += $vec[$i][1]*$cdata[$ci][$t][$m][$a][1];
+	  $dist += $vec[$i][2]*$cdata[$ci][$t][$m][$a][2];
+	  if($dist>0) {
+	    remove_mol_entity($ci,$fi,$t,$m);
+	    $m--;
+	    next loopmol;
+	  }
+	}
+      }
+    }
+  }
+}
+
 sub cut_truncated_octahedron {
   my ($t,$m,$a,$i,$x,$y,$z,@vec,@d,$dist,$buffer,$ci,$fi,$lsquare,$lhex);
   $ci      = $_[0];
@@ -2941,9 +2989,9 @@ sub cut_truncated_octahedron {
   @{$vec[12]}  = (-$x,-$x, $x);
   @{$vec[13]}  = (-$x,-$x,-$x);
   push(@d,$lhex,$lhex,$lhex,$lhex,$lhex,$lhex,$lhex,$lhex);
-  for($t=0;$t<$field_nummols[0];$t++) {
-    loopmol:for($m=0;$m<$mol_numents[0][$t];$m++) {
-      for($a=0;$a<$mol_numatoms[0][$t];$a++) {
+  for($t=0;$t<$field_nummols[$ci];$t++) {
+    loopmol:for($m=0;$m<$mol_numents[$ci][$t];$m++) {
+      for($a=0;$a<$mol_numatoms[$ci][$t];$a++) {
 	for($i=0;$i<@vec;$i++) {
 	  $dist  = $buffer-$d[$i];
 	  $dist += $vec[$i][0]*$cdata[$ci][$t][$m][$a][0];

@@ -566,7 +566,7 @@ sub parse_intlist {
     @linedata = split("-",$arg);
     if(not check_integer(@linedata)) {
       print "**** error: could not parse integers from expression $arg\n";
-      return undef;
+      return ();
     }
     if(@linedata==1) {
       push(@arr,$linedata[0]+$shift);
@@ -577,7 +577,7 @@ sub parse_intlist {
       }
     }else{
       print "**** error: could not parse integers from expression $arg\n";
-      return undef;
+      return ();
     }
   }
   return @arr;
